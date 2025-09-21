@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/0xf0xx0/oigiki"
@@ -25,26 +27,22 @@ type block struct {
 }
 
 func main() {
-	str := oigiki.ProcessTags(`
-{/}    {blue}02{/}     {cyan}97 00     {blue}1a     {green}2f 70 6f 67 6f 6c 6f 20 2d 20 66 6f 73 73 20 69 73
-{/}┌─────────┬─────┬──────────┬──────────────────────────────────────────────────┐
-{/}│{blue}OP_PUSH_2{/}│ {cyan}151{/} │{blue}OP_PUSH_26{/}│            {green}/pogolo - foss is{/}                     │
-{/}└─────────┴─────┴──────────┴──────────────────────────────────────────────────┘
-{/} {green}20 66 72 65 65 64 6f 6d 2f   {blue}93   {red}59 12 12 00 00 00 00
-{/}┌──────────────────────────┬──────┬────────────────────┐
-{/}│         {green}freedom/{/}         │{blue}OP_ADD{/}│      {red}[error]{/}       │
-{/}└──────────────────────────┴──────┴────────────────────┘
-		`)
-	str = str
-	///strings.ToValidUTF8(s string, replacement string)
-	println(str)
 	script, _ := hex.DecodeString("0297001a2f706f676f6c6f202d20666f73732069732066726565646f6d2f9359121200000000")
 	tkzr := txscript.MakeScriptTokenizer(0, script)
 	reverseOpcodeMap := make(map[byte]string)
 	for k, v := range txscript.OpcodeByName {
 		reverseOpcodeMap[v] = k
 	}
+	blks := parseCoinbaseScript(tkzr, reverseOpcodeMap)
+
+	for _, line := range chunkData(blks) {
+		println(fmt.Sprintf("%s", mergeBoxes(line)))
+	}
+}
+
+func parseCoinbaseScript(tkzr txscript.ScriptTokenizer, reverseOpcodeMap map[byte]string) []block {
 	blks := make([]block, 0, 20)
+	i := 0
 	for {
 		if tkzr.Done() {
 			break
@@ -66,33 +64,31 @@ func main() {
 			Type:   DATATYPE_OPCODE,
 		}
 		blks = append(blks, blk)
-		// println(fmt.Sprintf("%+v", blk))
 		if len(tkzr.Data()) > 0 {
 			hdr := prettyprintHex(tkzr.Data())
 			blk2 := block{
 				Header: hdr,
 			}
 			if strings.Contains(x, "DATA") {
-				blk2.Body = strings.ReplaceAll(strings.ToValidUTF8(string(tkzr.Data()), "."), "\x00", ".")
+				if i == 0 {
+					blk2.Body = strconv.Itoa(int(binary.LittleEndian.Uint16(tkzr.Data())))
+					blk2.Type = DATATYPE_INT
+				} else {
+					blk2.Body = strings.ReplaceAll(strings.ToValidUTF8(string(tkzr.Data()), "."), "\x00", ".")
+					blk2.Type = DATATYPE_STRING
+				}
 			}
-			// println(fmt.Sprintf("%+v", blk2))
 			blks = append(blks, blk2)
 		}
+		i++
 	}
-	/// furst pushed bytes are the block height
-	blks[1].Type = DATATYPE_INT
-	/// next is the miner tag
-	blks[3].Type = DATATYPE_STRING
-
-	for _, line := range chunkData(blks) {
-		println(fmt.Sprintf("%s", mergeBoxes(line)))
-	}
+	return blks
 }
 
 func prettyprintHex(b []byte) string {
 	hex := hex.EncodeToString(b)
 	ret := ""
-	// println(len(hex))
+
 	for x := 0; x < len(hex); x += 2 {
 		ret += string([]byte{hex[x], hex[x+1]})
 		ret += " "
@@ -106,6 +102,7 @@ func chunkData(blocks []block) [][]block {
 	for _, header := range blocks {
 		x := len(header.Header)
 		n := headerLen + x
+		/// TODO: chunk until n <= 80
 		if n > 80 {
 			if header.Type == DATATYPE_STRING {
 				/// break it
@@ -156,7 +153,7 @@ func chunkData(blocks []block) [][]block {
 func padString(str string, l int) string {
 	x := len(color.ClearCode(str))
 	y := len(str)
-	ansiLen := y-x
+	ansiLen := y - x
 	if x < l {
 		spaces := (l - x) / 2
 		ret := strings.Repeat(" ", l-(spaces+x)) + str + strings.Repeat(" ", l-(spaces+x))
