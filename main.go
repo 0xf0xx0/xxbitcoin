@@ -52,6 +52,11 @@ func main() {
 		tkzr.Next()
 		if err := tkzr.Err(); err != nil {
 			println(err.Error())
+			blk := block{
+				Header: prettyprintHex(tkzr.Script()[tkzr.ByteIndex():]),
+				Body:   "[error]",
+			}
+			blks = append(blks, blk)
 			break
 		}
 		x := reverseOpcodeMap[tkzr.Opcode()]
@@ -68,7 +73,7 @@ func main() {
 				Header: hdr,
 			}
 			if strings.Contains(x, "DATA") {
-				blk2.Body = strings.ToValidUTF8(string(tkzr.Data()), "..")
+				blk2.Body = strings.ReplaceAll(strings.ToValidUTF8(string(tkzr.Data()), "."), "\x00", ".")
 			}
 			// println(fmt.Sprintf("%+v", blk2))
 			blks = append(blks, blk2)
@@ -149,13 +154,14 @@ func chunkData(blocks []block) [][]block {
 }
 
 func padString(str string, l int) string {
-	x := len(str)
+	x := len(color.ClearCode(str))
+	y := len(str)
+	ansiLen := y-x
 	if x < l {
 		spaces := (l - x) / 2
-		ret := strings.Repeat(" ", spaces) + str + strings.Repeat(" ", l-(spaces+x))
-		return ret
+		ret := strings.Repeat(" ", l-(spaces+x)) + str + strings.Repeat(" ", l-(spaces+x))
+		return ret[:l+ansiLen]
 	}
-	// println("str: ", str)
 	return str
 }
 
@@ -170,12 +176,13 @@ func mergeBoxes(boxes []block) string {
 	if len(boxes) == 1 {
 		/// TODO: figure out how to add ansi here???
 		str := padString(boxes[0].Body, len(color.ClearCode(boxes[0].Header)))
+
 		split := strings.Split(b.String("", str), "\n")
 		if boxes[0].Header == "" {
 			ret[0] += strings.Repeat(" ", len(split[1])-6)
 		} else {
 			/// ansi MUST be cleared here for proper len
-			ret[0] += " " + padString(boxes[0].Header, len(color.ClearCode(split[1]))-6)
+			ret[0] += padString(boxes[0].Header, len(color.ClearCode(split[1]))-6)
 		}
 		ret[1] = split[0]
 		ret[2] = split[1]
@@ -185,6 +192,8 @@ func mergeBoxes(boxes []block) string {
 	for i, blk := range boxes {
 		/// ansi MUST be cleared here for proper len
 		str := padString(blk.Body, len(color.ClearCode(boxes[i].Header)))
+		x := str
+		// str = b.String("", str)
 		str = b.String("", colorText(blk.Type, str))
 		split := strings.Split(str, "\n")
 		/// box height is always 3
@@ -211,12 +220,13 @@ func mergeBoxes(boxes []block) string {
 			ret[3] += temp
 		}
 		if boxes[i].Header == "" {
-			ret[0] += strings.Repeat(" ", len(split[1])-6)
+			ret[0] += strings.Repeat(" ", len(color.ClearCode(x)))
 		} else {
 			/// ansi MUST be cleared here for proper len
-			ret[0] += " " + padString(boxes[i].Header, len(color.ClearCode(split[1]))-6)
+			ret[0] += padString(colorText(blk.Type, blk.Header), len(color.ClearCode(x))+1)
 		}
 	}
+	ret[0] = strings.TrimRight(ret[0], " ")
 	return strings.Join(ret, "\n")
 }
 func colorText(datatype int, text string) string {
