@@ -2,7 +2,7 @@ module xxbitcoin
 
 go 1.25.1
 
-replace github.com/Delta456/box-cli-maker => ../../GitHub/box-cli-maker
+replace github.com/Delta456/box-cli-maker/v2 => ../../GitHub/box-cli-maker
 
 require (
 	github.com/0xf0xx0/oigiki v1.0.1
@@ -19,7 +19,7 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.0.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
-	github.com/huandu/xstrings v1.3.2 // indirect
+	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
@@ -28,5 +28,5 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/crypto v0.25.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
-	golang.org/x/term v0.22.0 // indirect
+	golang.org/x/term v0.33.0 // indirect
 )
