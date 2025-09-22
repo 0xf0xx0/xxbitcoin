@@ -1,12 +1,10 @@
 TODO
 - [ ] decode transactions
 - [ ] decode block headers
-- [ ] decode scripts
-- [ ] prettyprint all like xxd, in ascii blocks and with color
+- [x] decode scripts
+- [x] prettyprint all like xxd, in ascii blocks and with color
     - color by type, eg string = green, number = blue
 - [ ] allow for different window sizes
-    - split into 2-char wide sections and use to determine where to place things?
-        - not including border
-- [ ] 
-- [ ] 
-- [ ]
+- [ ] chunk all strings correctly
+    - chunk hex strings (like blockhash in header)
+- [ ] chunk errors

@@ -1,15 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/0xf0xx0/oigiki"
 	"github.com/Delta456/box-cli-maker/v2"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/gookit/color"
 )
@@ -18,8 +21,7 @@ const (
 	DATATYPE_UNK = iota
 	DATATYPE_OPCODE
 	DATATYPE_STRING
-	DATATYPE_INT
-	DATATYPE_FLOAT
+	DATATYPE_NUMBER
 )
 
 type block struct {
@@ -31,11 +33,34 @@ func main() {
 	/// foundry usa 915753
 	// script, _ := hex.DecodeString("0329f90d041b21d0682f466f756e6472792055534120506f6f6c202364726f70676f6c642ffabe6d6d5c91db6d6adc594b6223bf953075281941f2450c5ba328544b7e04dcdc177d9901000000000000007c0134999e620d0000000000")
 	/// slushpool 915754
-	script, _ := hex.DecodeString("032af90d102f736c7573682f6500b006a066120e01fabe6d6d560a0f5f0cf3bd4dbfc58629a834166b021716b115cc267ba92822755946c705100000000000000000007b434d00000000000000")
+	// script, _ := hex.DecodeString("032af90d102f736c7573682f6500b006a066120e01fabe6d6d560a0f5f0cf3bd4dbfc58629a834166b021716b115cc267ba92822755946c705100000000000000000007b434d00000000000000")
 
-	// script, _ := hex.DecodeString("0346f90d1e2f706f676f6c6f202d20646563656e7472616c697a65206f72206469652f080000000000000000")
+	// script, _ := hex.DecodeString("47304402204113c4e58ccdedb5b633483720f8e9837b89c58847d6e4d033c576a5e2a295f702200b867d08291f884e491772b61fd03127a1e0efbdef87442c97f334d1aa4aef9901410426cbe208d7e5bf3b5b38ab0b05d0ddd8ef8ea06fe946d622ce5db29a27d3d020b3ffa629dda1201323b1dada376867201df1de49455e898ecc315511a84507da")
 	// script, _ := hex.DecodeString("0237011e2f706f676f6c6f202d20646563656e7472616c697a65206f72206469652f08fe53956400000000")
 	// script, _ := hex.DecodeString("0297001a2f706f676f6c6f202d20666f73732069732066726565646f6d2f9359121200000000")
+
+	// blks := parseCoinbaseScript(script)
+	header, _ := hex.DecodeString("00005823301b30a68438ea562def4083f1b6151883e4858eaa1a01000000000000000000c6fe1e8c906cae6ea804a2cffbc2afe8a750985ae991fcb49e71003e3a7e16d32029d06838fa01171c223ef2")
+	blks := parseBlockHeader(header)
+
+	for _, line := range chunkData(blks) {
+		println(fmt.Sprintf("%s", mergeBoxes(line)))
+	}
+}
+
+func parseCoinbaseScript(script []byte) []block {
+	blks := parseScript(script)
+	blks[1].Type = DATATYPE_NUMBER
+	b := append([]byte(blks[1].Body), 0)
+	if len(b)%2 == 1 {
+		b = append([]byte(blks[1].Body), 0)
+	}
+	/// TODO: always pad to uint32?
+	blks[1].Body = strconv.Itoa(int(binary.LittleEndian.Uint32(b)))
+	return blks
+}
+func parseScript(script []byte) []block {
+	blks := make([]block, 0, 20)
 	tkzr := txscript.MakeScriptTokenizer(0, script)
 	reverseOpcodeMap := make(map[byte]string)
 	/// TODO: OP_0 and OP_TRUE swap places
@@ -48,15 +73,6 @@ func main() {
 		}
 		reverseOpcodeMap[v] = k
 	}
-	blks := parseCoinbaseScript(tkzr, reverseOpcodeMap)//[:5]
-
-	for _, line := range chunkData(blks) {
-		println(fmt.Sprintf("%s", mergeBoxes(line)))
-	}
-}
-
-func parseCoinbaseScript(tkzr txscript.ScriptTokenizer, reverseOpcodeMap map[byte]string) []block {
-	blks := make([]block, 0, 20)
 	i := 0
 	for {
 		if tkzr.Done() {
@@ -65,11 +81,17 @@ func parseCoinbaseScript(tkzr txscript.ScriptTokenizer, reverseOpcodeMap map[byt
 		tkzr.Next()
 		if err := tkzr.Err(); err != nil {
 			println(err.Error())
+			opcode := tkzr.Script()[tkzr.ByteIndex() : tkzr.ByteIndex()+1]
 			blk := block{
-				Header: prettyprintHex(tkzr.Script()[tkzr.ByteIndex():]),
-				Body:   "[error]",
+				Header: prettyprintHex(opcode),
+				Body:   reverseOpcodeMap[opcode[0]],
+				Type:   DATATYPE_OPCODE,
 			}
-			blks = append(blks, blk)
+			blk2 := block{
+				Header: prettyprintHex(tkzr.Script()[tkzr.ByteIndex()+1:]),
+				Body:   err.Error(),
+			}
+			blks = append(blks, blk, blk2)
 			break
 		}
 		x := reverseOpcodeMap[tkzr.Opcode()]
@@ -85,22 +107,8 @@ func parseCoinbaseScript(tkzr txscript.ScriptTokenizer, reverseOpcodeMap map[byt
 				Header: hdr,
 			}
 			if strings.Contains(x, "DATA") {
-				if i == 0 {
-					d := make([]byte, len(tkzr.Data()))
-				 	copy(d, tkzr.Data())
-					if len(d) % 2 == 1 {
-						d = append(d, 0)
-					}
-					if len(d) == 2 {
-						blk2.Body = strconv.Itoa(int(binary.LittleEndian.Uint16(d)))
-					} else if len(d) == 4 {
-						blk2.Body = strconv.Itoa(int(binary.LittleEndian.Uint32(d)))
-					}
-					blk2.Type = DATATYPE_INT
-				} else {
-					blk2.Body = string(tkzr.Data())
-					blk2.Type = DATATYPE_STRING
-				}
+				blk2.Body = string(tkzr.Data())
+				blk2.Type = DATATYPE_STRING
 			}
 			blks = append(blks, blk2)
 		}
@@ -109,8 +117,67 @@ func parseCoinbaseScript(tkzr txscript.ScriptTokenizer, reverseOpcodeMap map[byt
 	return blks
 }
 
-//func parseBlockHeader()
+func parseBlockHeader(input []byte) []block {
+	buf := bytes.NewBuffer(input)
+	blks := make([]block, 6)
+	ver := make([]byte, 4)
+	prevBlockHash := [32]byte{}
+	merkleRoot := [32]byte{}
+	blockTime := make([]byte, 4)
+	nbits := make([]byte, 4)
+	nonce := make([]byte, 4)
 
+	_, err := buf.Read(ver)
+	if err != nil {
+		/// TODO
+	}
+	_, err = buf.Read(prevBlockHash[:])
+	_, err = buf.Read(merkleRoot[:])
+	_, err = buf.Read(blockTime)
+	_, err = buf.Read(nbits)
+	_, err = buf.Read(nonce)
+	//hex.Decode(prevBlockHash, prevBlockHash)
+
+	blks[0] = block{
+		Header: prettyprintHex(ver),
+		Body:   strconv.Itoa(int(binary.LittleEndian.Uint32(ver))),
+		Type:   DATATYPE_NUMBER,
+	}
+	blks[1] = block{
+		Header: prettyprintHex(prevBlockHash[:]),
+		Body:   chainhash.Hash(prevBlockHash).String(),
+		Type:   DATATYPE_UNK,
+	}
+	blks[2] = block{
+		Header: prettyprintHex(merkleRoot[:]),
+		Body:   chainhash.Hash(merkleRoot).String(),
+		Type:   DATATYPE_UNK,
+	}
+	blks[3] = block{
+		Header: prettyprintHex(blockTime),
+		Body:   time.Unix(int64(binary.LittleEndian.Uint32(blockTime)), 0).String(),
+		Type:   DATATYPE_STRING,
+	}
+	blks[4] = block{
+		Header: prettyprintHex(nbits),
+		Body:   strconv.Itoa(int(binary.LittleEndian.Uint32(nbits))),
+		Type:   DATATYPE_NUMBER,
+	}
+	blks[5] = block{
+		Header: prettyprintHex(nonce),
+		Body:   strconv.Itoa(int(binary.LittleEndian.Uint32(nonce))),
+		Type:   DATATYPE_NUMBER,
+	}
+	return blks
+}
+
+func reverseBytes(b []byte) []byte {
+	x := len(b)
+	for i := 0; i < x/2; i++ {
+		b[i], b[x-1-i] = b[x-1-i], b[i]
+	}
+	return b
+}
 func prettyprintHex(b []byte) string {
 	hex := hex.EncodeToString(b)
 	ret := ""
@@ -127,38 +194,50 @@ func chunkData(blocks []block) [][]block {
 	ret := make([][]block, 1, 2)
 	headerLen := 0
 	currLine := 0
+	lineLengthMax := 80
+	/// TODO: refactor and cleanup
 	for _, blk := range blocks {
 		x := max(len(blk.Header), len(blk.Body))
-		lineLengthMax := 80
-		estimatedLen := headerLen + x
+		estimatedLen := headerLen + x + 1
 		if estimatedLen > lineLengthMax {
 			if blk.Type == DATATYPE_STRING {
 				/// break it
+				ret, currLine, headerLen, x = chunkStringBlock(blk, lineLengthMax, headerLen, ret, currLine, x)
+			} else if blk.Type == DATATYPE_UNK {
 				var splitData []string
-				data := blk.Body
-				/// -2 cause borders
-				maxRunesCurrentLine := (lineLengthMax-headerLen)/3 - 2
-				// Second term has lengthLineMax/3 added; for data of length 27 and line length 15, I'll want to create one slice at [0,15] and a second at [15,27] (clamping 30 to 27), so the loop needs to go "one past"
-				for i := maxRunesCurrentLine; i < len(data)+lineLengthMax/3; i += lineLengthMax / 3 {
-					dataStart := max(i-lineLengthMax/3, 0) // Previous iteration, or start of string
-					dataEnd := max(min(i, len(data)), 0)   // Current iteration, or end of string
+				var splitBody []string
+				data := blk.Header
+				/// -2 cause borders and then -4 cause hex string
+				maxRunesCurrentLine := (lineLengthMax - headerLen) - 6
+
+				for i := maxRunesCurrentLine; i < len(data)+lineLengthMax; i += lineLengthMax {
+					dataStart := max(i-lineLengthMax, 0) // Previous iteration, or start of string
+					dataEnd := max(min(i, len(data)), 0) // Current iteration, or end of string
 					if dataStart != dataEnd {
-						splitData = append(splitData, string(data[dataStart:dataEnd]))
+						splitData = append(splitData, strings.TrimSpace(string(data[dataStart:dataEnd])))
+						startratio := float32(0)
+						endratio := float32(dataEnd) / float32(len(data))
+						if dataStart > 0 {
+							startratio = float32(dataStart) / float32(len(data))
+						}
+						start := int(float32(len(blk.Body)) * startratio)
+						end := int(float32(len(blk.Body)) * endratio)
+						splitBody = append(splitBody, strings.TrimSpace(string(blk.Body[start:end])))
 					}
 				}
 				var blocks []block
 				if len(splitData) == 0 {
-					blocks = append(blocks, blk)
+					ret[currLine] = append(ret[currLine], blk)
 				} else {
-					for _, d := range splitData {
+					for i, d := range splitData {
 						blocks = append(blocks, block{
-							Header: prettyprintHex([]byte(d)),
-							Body:   d,
-							Type: blk.Type,
+							Header: d,
+							Body:   splitBody[i],
+							Type:   blk.Type,
 						})
 					}
 					ret[currLine] = append(ret[currLine], blocks[0])
-					for _,b := range blocks[1:] {
+					for _, b := range blocks[1:] {
 						x += len(b.Header)
 						/// TODO: is this it? just headerLen+x?
 						if headerLen+x > lineLengthMax {
@@ -171,6 +250,8 @@ func chunkData(blocks []block) [][]block {
 					headerLen = 0
 				}
 			} else {
+				/// move it to the next line and blindly assume its short enough
+				/// to display without overflow
 				currLine++
 				ret = append(ret, make([]block, 0, 3))
 				ret[currLine] = append(ret[currLine], blk)
@@ -182,6 +263,46 @@ func chunkData(blocks []block) [][]block {
 		headerLen += x
 	}
 	return ret
+}
+
+func chunkStringBlock(blk block, lineLengthMax int, headerLen int, ret [][]block, currLine int, x int) ([][]block, int, int, int) {
+	var splitData []string
+	data := blk.Body
+	/// -2 cause borders
+	maxRunesCurrentLine := (lineLengthMax-headerLen)/3 - 2
+	// Second term has lengthLineMax/3 added; for data of length 27 and line length 15, I'll want to create one slice at [0,15] and a second at [15,27] (clamping 30 to 27), so the loop needs to go "one past"
+	for i := maxRunesCurrentLine; i < len(data)+lineLengthMax/3; i += lineLengthMax / 3 {
+		dataStart := max(i-lineLengthMax/3, 0) // Previous iteration, or start of string
+		dataEnd := max(min(i, len(data)), 0)   // Current iteration, or end of string
+		if dataStart != dataEnd {
+			splitData = append(splitData, string(data[dataStart:dataEnd]))
+		}
+	}
+	if len(splitData) == 0 {
+		ret[currLine] = append(ret[currLine], blk)
+	} else {
+		var blocks []block
+		for _, d := range splitData {
+			blocks = append(blocks, block{
+				Header: prettyprintHex([]byte(d)),
+				Body:   d,
+				Type:   blk.Type,
+			})
+		}
+		ret[currLine] = append(ret[currLine], blocks[0])
+		for _, b := range blocks[1:] {
+			x += len(b.Header)
+			/// TODO: is this it? just headerLen+x?
+			if headerLen+x > lineLengthMax {
+				currLine++
+				ret = append(ret, make([]block, 0, 3))
+				x = len(b.Header)
+			}
+			ret[currLine] = append(ret[currLine], b)
+		}
+		headerLen = 0
+	}
+	return ret, currLine, headerLen, x
 }
 
 func padString(str string, l int) string {
@@ -266,9 +387,7 @@ func replaceNonPrintable(input string) string {
 func colorText(datatype int, text string) string {
 	color := ""
 	switch datatype {
-	case DATATYPE_INT:
-		fallthrough
-	case DATATYPE_FLOAT:
+	case DATATYPE_NUMBER:
 		{
 			color = "blue"
 		}
