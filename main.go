@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"log"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +18,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/gookit/color"
+	"github.com/urfave/cli/v3"
 )
 
 const (
@@ -30,6 +34,59 @@ type block struct {
 }
 
 func main() {
+	app := &cli.Command{
+		Name:                   "xxbitcoin",
+		Usage:                  "pretty-prints bitcoin structures",
+		UsageText:              "xxbitcoin [options]",
+		Version:                "0.0.1",
+		UseShortOptionHandling: true,
+		EnableShellCompletion:  true,
+		ReadArgsFromStdin:      true,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:     "type",
+				Aliases:  []string{"t"},
+				Usage:    "`data structure` type (script, header, coinbasescript)",
+				Required: true,
+			},
+		},
+		Action: func(_ context.Context, ctx *cli.Command) error {
+			blks := []block{}
+			rawInput := ctx.Args().Get(0)
+			/// TODO: clean this up
+			if len(rawInput) == 0 {
+				return fmt.Errorf("no input")
+			}
+			input, err := hex.DecodeString(rawInput)
+			if err != nil {
+				println(rawInput)
+				return err
+			}
+			switch ctx.String("type") {
+			case "script":
+				{
+					blks = parseScript(input)
+				}
+			case "coinbasescript":
+				{
+					blks = parseCoinbaseScript(input)
+				}
+			case "header":
+				{
+					blks = parseBlockHeader(input)
+				}
+			default:
+				{
+					return fmt.Errorf("yo wtf")
+				}
+			}
+			for _, line := range chunkData(blks) {
+				println(fmt.Sprintf("%s", mergeBoxes(line)))
+			}
+			return nil
+		},
+	}
+
 	/// foundry usa 915753
 	// script, _ := hex.DecodeString("0329f90d041b21d0682f466f756e6472792055534120506f6f6c202364726f70676f6c642ffabe6d6d5c91db6d6adc594b6223bf953075281941f2450c5ba328544b7e04dcdc177d9901000000000000007c0134999e620d0000000000")
 	/// slushpool 915754
@@ -39,12 +96,10 @@ func main() {
 	// script, _ := hex.DecodeString("0237011e2f706f676f6c6f202d20646563656e7472616c697a65206f72206469652f08fe53956400000000")
 	// script, _ := hex.DecodeString("0297001a2f706f676f6c6f202d20666f73732069732066726565646f6d2f9359121200000000")
 
-	// blks := parseCoinbaseScript(script)
-	header, _ := hex.DecodeString("00005823301b30a68438ea562def4083f1b6151883e4858eaa1a01000000000000000000c6fe1e8c906cae6ea804a2cffbc2afe8a750985ae991fcb49e71003e3a7e16d32029d06838fa01171c223ef2")
-	blks := parseBlockHeader(header)
+	// header, _ := hex.DecodeString("00005823301b30a68438ea562def4083f1b6151883e4858eaa1a01000000000000000000c6fe1e8c906cae6ea804a2cffbc2afe8a750985ae991fcb49e71003e3a7e16d32029d06838fa01171c223ef2")
 
-	for _, line := range chunkData(blks) {
-		println(fmt.Sprintf("%s", mergeBoxes(line)))
+	if err := app.Run(context.Background(), os.Args); err != nil {
+		log.Fatal(err)
 	}
 }
 
@@ -63,10 +118,10 @@ func parseScript(script []byte) []block {
 	blks := make([]block, 0, 20)
 	tkzr := txscript.MakeScriptTokenizer(0, script)
 	reverseOpcodeMap := make(map[byte]string)
-	/// TODO: OP_0 and OP_TRUE swap places
-	/// prefer TRUE and FALSE
 	for k, v := range txscript.OpcodeByName {
 		if pk, ok := reverseOpcodeMap[v]; ok {
+			/// TODO: aliased ops switch places
+			/// prefer the longer one
 			if len(k) < len(pk) {
 				continue
 			}
@@ -80,7 +135,6 @@ func parseScript(script []byte) []block {
 		}
 		tkzr.Next()
 		if err := tkzr.Err(); err != nil {
-			println(err.Error())
 			opcode := tkzr.Script()[tkzr.ByteIndex() : tkzr.ByteIndex()+1]
 			blk := block{
 				Header: prettyprintHex(opcode),
@@ -136,7 +190,6 @@ func parseBlockHeader(input []byte) []block {
 	_, err = buf.Read(blockTime)
 	_, err = buf.Read(nbits)
 	_, err = buf.Read(nonce)
-	//hex.Decode(prevBlockHash, prevBlockHash)
 
 	blks[0] = block{
 		Header: prettyprintHex(ver),
@@ -156,7 +209,7 @@ func parseBlockHeader(input []byte) []block {
 	blks[3] = block{
 		Header: prettyprintHex(blockTime),
 		Body:   time.Unix(int64(binary.LittleEndian.Uint32(blockTime)), 0).String(),
-		Type:   DATATYPE_STRING,
+		Type:   DATATYPE_UNK,
 	}
 	blks[4] = block{
 		Header: prettyprintHex(nbits),
@@ -171,13 +224,6 @@ func parseBlockHeader(input []byte) []block {
 	return blks
 }
 
-func reverseBytes(b []byte) []byte {
-	x := len(b)
-	for i := 0; i < x/2; i++ {
-		b[i], b[x-1-i] = b[x-1-i], b[i]
-	}
-	return b
-}
 func prettyprintHex(b []byte) string {
 	hex := hex.EncodeToString(b)
 	ret := ""
@@ -202,61 +248,17 @@ func chunkData(blocks []block) [][]block {
 		if estimatedLen > lineLengthMax {
 			if blk.Type == DATATYPE_STRING {
 				/// break it
-				ret, currLine, headerLen, x = chunkStringBlock(blk, lineLengthMax, headerLen, ret, currLine, x)
+				currLine, x = chunkStringBlock(blk, lineLengthMax, headerLen, &ret, currLine, x)
 			} else if blk.Type == DATATYPE_UNK {
-				var splitData []string
-				var splitBody []string
-				data := blk.Header
-				/// -2 cause borders and then -4 cause hex string
-				maxRunesCurrentLine := (lineLengthMax - headerLen) - 6
-
-				for i := maxRunesCurrentLine; i < len(data)+lineLengthMax; i += lineLengthMax {
-					dataStart := max(i-lineLengthMax, 0) // Previous iteration, or start of string
-					dataEnd := max(min(i, len(data)), 0) // Current iteration, or end of string
-					if dataStart != dataEnd {
-						splitData = append(splitData, strings.TrimSpace(string(data[dataStart:dataEnd])))
-						startratio := float32(0)
-						endratio := float32(dataEnd) / float32(len(data))
-						if dataStart > 0 {
-							startratio = float32(dataStart) / float32(len(data))
-						}
-						start := int(float32(len(blk.Body)) * startratio)
-						end := int(float32(len(blk.Body)) * endratio)
-						splitBody = append(splitBody, strings.TrimSpace(string(blk.Body[start:end])))
-					}
-				}
-				var blocks []block
-				if len(splitData) == 0 {
-					ret[currLine] = append(ret[currLine], blk)
-				} else {
-					for i, d := range splitData {
-						blocks = append(blocks, block{
-							Header: d,
-							Body:   splitBody[i],
-							Type:   blk.Type,
-						})
-					}
-					ret[currLine] = append(ret[currLine], blocks[0])
-					for _, b := range blocks[1:] {
-						x += len(b.Header)
-						/// TODO: is this it? just headerLen+x?
-						if headerLen+x > lineLengthMax {
-							currLine++
-							ret = append(ret, make([]block, 0, 3))
-							x = len(b.Header)
-						}
-						ret[currLine] = append(ret[currLine], b)
-					}
-					headerLen = 0
-				}
+				currLine, x = chunkBlock(blk, lineLengthMax, headerLen, &ret, currLine, x)
 			} else {
 				/// move it to the next line and blindly assume its short enough
 				/// to display without overflow
 				currLine++
 				ret = append(ret, make([]block, 0, 3))
 				ret[currLine] = append(ret[currLine], blk)
-				headerLen = 0
 			}
+			headerLen = 0
 		} else {
 			ret[currLine] = append(ret[currLine], blk)
 		}
@@ -265,7 +267,58 @@ func chunkData(blocks []block) [][]block {
 	return ret
 }
 
-func chunkStringBlock(blk block, lineLengthMax int, headerLen int, ret [][]block, currLine int, x int) ([][]block, int, int, int) {
+// / TODO: replace chunkStringBlock
+// / chunks a long block across multiple lines
+func chunkBlock(blk block, lineLengthMax int, headerLen int, ret *[][]block, currLine int, x int) (int, int) {
+	var splitData []string
+	var splitBody []string
+	data := blk.Header
+	/// -2 cause borders and then -4 cause hex string
+	maxRunesCurrentLine := (lineLengthMax - headerLen) - 6
+
+	for i := maxRunesCurrentLine; i < len(data)+lineLengthMax; i += lineLengthMax {
+		dataStart := max(i-lineLengthMax, 0) // Previous iteration, or start of string
+		dataEnd := max(min(i, len(data)), 0) // Current iteration, or end of string
+		if dataStart != dataEnd {
+			splitData = append(splitData, strings.TrimSpace(string(data[dataStart:dataEnd])))
+			startratio := float32(0)
+			endratio := float32(dataEnd) / float32(len(data))
+			if dataStart > 0 {
+				startratio = float32(dataStart) / float32(len(data))
+			}
+			start := int(float32(len(blk.Body)) * startratio)
+			end := int(float32(len(blk.Body)) * endratio)
+			splitBody = append(splitBody, strings.TrimSpace(string(blk.Body[start:end])))
+		}
+	}
+	var blocks []block
+	if len(splitData) == 0 {
+		(*ret)[currLine] = append((*ret)[currLine], blk)
+	} else {
+		for i, d := range splitData {
+			blocks = append(blocks, block{
+				Header: d,
+				Body:   splitBody[i],
+				Type:   blk.Type,
+			})
+		}
+		(*ret)[currLine] = append((*ret)[currLine], blocks[0])
+		for _, b := range blocks[1:] {
+			x += len(b.Header)
+			/// TODO: is this it? just headerLen+x?
+			if headerLen+x > lineLengthMax {
+				currLine++
+				(*ret) = append((*ret), make([]block, 0, 3))
+				x = len(b.Header)
+			}
+			(*ret)[currLine] = append((*ret)[currLine], b)
+		}
+	}
+	return currLine, x
+}
+
+// / same as chunkBlock but optimized for strings
+func chunkStringBlock(blk block, lineLengthMax int, headerLen int, ret *[][]block, currLine int, x int) (int, int) {
 	var splitData []string
 	data := blk.Body
 	/// -2 cause borders
@@ -279,7 +332,7 @@ func chunkStringBlock(blk block, lineLengthMax int, headerLen int, ret [][]block
 		}
 	}
 	if len(splitData) == 0 {
-		ret[currLine] = append(ret[currLine], blk)
+		(*ret)[currLine] = append((*ret)[currLine], blk)
 	} else {
 		var blocks []block
 		for _, d := range splitData {
@@ -289,20 +342,19 @@ func chunkStringBlock(blk block, lineLengthMax int, headerLen int, ret [][]block
 				Type:   blk.Type,
 			})
 		}
-		ret[currLine] = append(ret[currLine], blocks[0])
+		(*ret)[currLine] = append((*ret)[currLine], blocks[0])
 		for _, b := range blocks[1:] {
 			x += len(b.Header)
 			/// TODO: is this it? just headerLen+x?
 			if headerLen+x > lineLengthMax {
 				currLine++
-				ret = append(ret, make([]block, 0, 3))
+				(*ret) = append((*ret), make([]block, 0, 3))
 				x = len(b.Header)
 			}
-			ret[currLine] = append(ret[currLine], b)
+			(*ret)[currLine] = append((*ret)[currLine], b)
 		}
-		headerLen = 0
 	}
-	return ret, currLine, headerLen, x
+	return currLine, x
 }
 
 func padString(str string, l int) string {
@@ -317,6 +369,7 @@ func padString(str string, l int) string {
 	return str
 }
 
+// / merge boxes together into one box line
 func mergeBoxes(boxes []block) string {
 	b := box.New(
 		box.Config{
@@ -371,6 +424,7 @@ func mergeBoxes(boxes []block) string {
 	ret[0] = strings.TrimRight(ret[0], " ")
 	return strings.Join(ret, "\n")
 }
+
 func replaceNonPrintable(input string) string {
 	result := []rune{}
 
@@ -406,27 +460,3 @@ func colorText(datatype int, text string) string {
 	}
 	return oigiki.ProcessTags(fmt.Sprintf("{%s}%s{/}", color, text))
 }
-
-/// TODO: test file
-//
-// ret := b.String("", " freedom/")
-// split := mergeBoxes([]string{ret})
-// println(fmt.Sprintf("%s", strings.Join(split, "\n")))
-// println(fmt.Sprintf("%s", strings.Join(mergeBoxes([]string{b.String("", "multi"),
-// 	b.String("", "box")}), "\n")))
-
-// println(fmt.Sprintf("%s", strings.Join(mergeBoxes([]string{b.String("", "multi"), b.String("", "box"), b.String("", "test")}), "\n")))
-// println(fmt.Sprintf("%s", strings.Join(mergeBoxes([]string{
-// 	b.String("", "multi"),
-// 	b.String("", "box"),
-// 	b.String("", "test"),
-// 	b.String("", "quad"),
-// }), "\n")))
-// println(fmt.Sprintf("%s", strings.Join(mergeBoxes([]string{
-// 	b.String("", "multi"),
-// 	b.String("", "box"),
-// 	b.String("", "test"),
-// 	b.String("", "quadwfjkwfbwfvuwi"),
-// 	b.String("", "quin"),
-// 	b.String("", "sexbdugvebfuwu"),
-// }), "\n")))
