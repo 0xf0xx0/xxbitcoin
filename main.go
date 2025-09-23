@@ -241,6 +241,8 @@ func prettyprintHex(b []byte) string {
 	}
 	return ret
 }
+
+// / chunk a line of blocks into multiple lines
 func chunkData(blocks []block) [][]block {
 	ret := make([][]block, 1, 2)
 	headerLen := 0
@@ -251,22 +253,27 @@ func chunkData(blocks []block) [][]block {
 		x := max(len(blk.Header), len(blk.Body))
 		estimatedLen := headerLen + x + 2
 		if estimatedLen > lineLengthMax {
-			switch (blk.Type) {
-				case DATATYPE_TIME:
-					fallthrough
-				case DATATYPE_STRING: {
+			switch blk.Type {
+			case DATATYPE_TIME:
+				fallthrough
+			case DATATYPE_STRING:
+				{
 					/// break it
 					currLine, x = chunkStringBlock(blk, lineLengthMax, headerLen, &ret, currLine, x)
 				}
-				case DATATYPE_ERR:
-					lineLengthMax -= 4
-					fallthrough
-				case DATATYPE_MISC:
-					fallthrough
-				case DATATYPE_HASH: {
+			case DATATYPE_ERR:
+				/// FIXME: why do long error blocks get chunked too late?
+				/// try with script 30450221009d4cdcb330786e787164a025abca8a0655f3803da66ef18d14745819b7e28b6b02200d98881bdd055ff2da39e61a858936866610c7e878ea62f08c5ee1534532c14a01
+				// lineLengthMax -= 2
+				fallthrough
+			case DATATYPE_MISC:
+				fallthrough
+			case DATATYPE_HASH:
+				{
 					currLine, x = chunkBlock(blk, lineLengthMax, headerLen, &ret, currLine, x)
 				}
-				default: {
+			default:
+				{
 					/// move it to the next line and blindly assume its short enough
 					/// to display without overflow
 					currLine++
@@ -285,47 +292,56 @@ func chunkData(blocks []block) [][]block {
 
 // / TODO: replace chunkStringBlock
 // / chunks a long block across multiple lines
-func chunkBlock(blk block, lineLengthMax int, headerLen int, ret *[][]block, currLine int, x int) (int, int) {
+func chunkBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currLine int, x int) (int, int) {
 	var splitData []string
 	var splitBody []string
-	data := blk.Header
-	/// -2 cause borders and then -2 cause hex string
-	maxRunesCurrentLine := (lineLengthMax - headerLen) - 4
+	header := blk.Header
+	headerLen := len(header)
+	bodyLen := len(blk.Body)
+	/// -2 cause borders
+	maxRunesCurrentLine := lineLengthMax - currLen - 4
 
-	for i := maxRunesCurrentLine; i < len(data)+lineLengthMax; i += lineLengthMax {
+	var blocks []block
+	for i := maxRunesCurrentLine; i < headerLen+lineLengthMax; i += lineLengthMax {
 		dataStart := max(i-lineLengthMax, 0) // Previous iteration, or start of string
-		dataEnd := max(min(i, len(data)), 0) // Current iteration, or end of string
+		dataEnd := max(min(i, headerLen), 0) // Current iteration, or end of string
 		if dataStart != dataEnd {
-			splitData = append(splitData, strings.TrimSpace(string(data[dataStart:dataEnd])))
-			/// take a bite out of the header too
-			/// for string this is nice cause its always a 3:1 ratio, so we'll always
-			/// select whole bytes
-			startratio := float32(0)
-			endratio := float32(dataEnd) / float32(len(data))
-			if dataStart > 0 {
-				startratio = float32(dataStart) / float32(len(data))
+			x1 := strings.TrimSpace(string(header[dataStart:dataEnd]))
+			splitData = append(splitData, x1)
+			scale := float32(1)
+			/// if the body is longer, scale our chunking down to fit within the max width
+			if bodyLen > headerLen {
+				scale = float32(headerLen) / float32(bodyLen)
 			}
-			start := int(float32(len(blk.Body)) * startratio)
-			end := int(float32(len(blk.Body)) * endratio)
-			splitBody = append(splitBody, strings.TrimSpace(string(blk.Body[start:end])))
+			startratio := float32(0)
+			endratio := float32(dataEnd) / float32(headerLen)
+			if dataStart > 0 {
+				startratio = float32(dataStart) / float32(headerLen)
+			}
+			start := int(float32(bodyLen) * startratio * scale)
+			/// but for the last chunk, we want to grab all remaining chars
+			/// we can safely assume the chunk is less than max width
+			if i+lineLengthMax > headerLen+lineLengthMax {
+				scale = 1
+			}
+			end := int(float32(bodyLen) * endratio * scale)
+			x2 := strings.TrimSpace(string(blk.Body[start:end]))
+			splitBody = append(splitBody, x2)
+			newBlk := block{
+				Header: x1,
+				Body:   x2,
+				Type:   blk.Type,
+			}
+			blocks = append(blocks, newBlk)
 		}
 	}
-	var blocks []block
-	if len(splitData) == 0 {
-		(*ret)[currLine] = append((*ret)[currLine], blk)
-	} else {
-		for i, d := range splitData {
-			blocks = append(blocks, block{
-				Header: d,
-				Body:   splitBody[i],
-				Type:   blk.Type,
-			})
-		}
-		(*ret)[currLine] = append((*ret)[currLine], blocks[0])
+
+	(*ret)[currLine] = append((*ret)[currLine], blocks[0])
+	if len(blocks) > 1 {
 		for _, b := range blocks[1:] {
 			x += len(b.Header)
-			/// TODO: is this it? just headerLen+x?
-			if headerLen+x > lineLengthMax {
+			/// TODO: is this it? just currLen+x?
+			if currLen+x > lineLengthMax {
 				currLine++
 				(*ret) = append((*ret), make([]block, 0, 3))
 				x = len(b.Header)
@@ -333,6 +349,7 @@ func chunkBlock(blk block, lineLengthMax int, headerLen int, ret *[][]block, cur
 			(*ret)[currLine] = append((*ret)[currLine], b)
 		}
 	}
+
 	return currLine, x
 }
 
@@ -342,13 +359,16 @@ func chunkStringBlock(blk block, lineLengthMax int, headerLen int, ret *[][]bloc
 	var splitHdr []string
 	data := blk.Body
 	/// -4 cause borders? i think? majik number that seems to work
-	maxRunesCurrentLine := (lineLengthMax-headerLen-4)/3
+	maxRunesCurrentLine := (lineLengthMax - headerLen - 4) / 3
 	// Second term has lengthLineMax/3 added; for data of length 27 and line length 15, I'll want to create one slice at [0,15] and a second at [15,27] (clamping 30 to 27), so the loop needs to go "one past"
 	for i := maxRunesCurrentLine; i < len(data)+lineLengthMax/3; i += lineLengthMax / 3 {
 		dataStart := max(i-lineLengthMax/3, 0) // Previous iteration, or start of string
 		dataEnd := max(min(i, len(data)), 0)   // Current iteration, or end of string
 		if dataStart != dataEnd {
 			splitData = append(splitData, string(data[dataStart:dataEnd]))
+			/// take a bite out of the header too
+			/// for string this is nice cause its always a 3:1 ratio, so we'll always
+			/// select whole bytes
 			startratio := float32(0)
 			endratio := float32(dataEnd) / float32(len(data))
 			if dataStart > 0 {
