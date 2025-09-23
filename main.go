@@ -56,7 +56,6 @@ func main() {
 		Action: func(_ context.Context, ctx *cli.Command) error {
 			blks := []block{}
 			rawInput := ctx.Args().Get(0)
-			/// TODO: clean this up
 			if len(rawInput) == 0 {
 				return fmt.Errorf("no input")
 			}
@@ -80,7 +79,7 @@ func main() {
 				}
 			default:
 				{
-					return fmt.Errorf("yo wtf")
+					return fmt.Errorf("unknown data structure")
 				}
 			}
 			for _, line := range chunkData(blks) {
@@ -233,6 +232,7 @@ func parseBlockHeader(input []byte) []block {
 	return blks
 }
 
+// / "b00b69" -> "b0 0b 69"
 func prettyprintHex(b []byte) string {
 	hex := hex.EncodeToString(b)
 	ret := ""
@@ -361,19 +361,17 @@ func chunkBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currL
 }
 
 // / same as chunkBlock but optimized for strings
-func chunkStringBlock(blk block, lineLengthMax int, headerLen int, ret *[][]block, currLine int, x int) (int, int) {
-	var splitData []string
-	var splitHdr []string
+func chunkStringBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currLine int, x int) (int, int) {
+	chunks := make([]block, 0, 4)
 	data := blk.Body
 	dataLen := len(data)
 	/// -4 cause borders? i think? majik number that seems to work
-	maxRunesCurrentLine := (lineLengthMax - headerLen - 4) / 3
+	maxRunesCurrentLine := (lineLengthMax - currLen - 4) / 3
 	// Second term has lengthLineMax/3 added; for data of length 27 and line length 15, I'll want to create one slice at [0,15] and a second at [15,27] (clamping 30 to 27), so the loop needs to go "one past"
 	for i := maxRunesCurrentLine; i < dataLen+lineLengthMax/3; i += lineLengthMax / 3 {
 		dataStart := max(i-lineLengthMax/3, 0) // Previous iteration, or start of string
-		dataEnd := max(min(i, dataLen), 0)   // Current iteration, or end of string
+		dataEnd := max(min(i, dataLen), 0)     // Current iteration, or end of string
 		if dataStart != dataEnd {
-			splitData = append(splitData, data[dataStart:dataEnd])
 			/// take a bite out of the header too
 			/// for string this is nice cause its always a 3:1 ratio, so we'll always
 			/// select whole bytes
@@ -384,26 +382,21 @@ func chunkStringBlock(blk block, lineLengthMax int, headerLen int, ret *[][]bloc
 			}
 			start := int(float32(len(blk.Header)) * startratio)
 			end := int(float32(len(blk.Header)) * endratio)
-			splitHdr = append(splitHdr, strings.TrimSpace(string(blk.Header[start:end])))
+
+			chunk := block{
+				Header: strings.TrimSpace(string(blk.Header[start:end])),
+				Body:   data[dataStart:dataEnd],
+				Type:   blk.Type,
+			}
+			chunks = append(chunks, chunk)
 		}
 	}
-	if len(splitData) == 0 {
-		(*ret)[currLine] = append((*ret)[currLine], blk)
-	} else {
-		var blocks []block
-		for x, d := range splitData {
-			x = x
-			blocks = append(blocks, block{
-				Header: splitHdr[x],
-				Body:   d,
-				Type:   blk.Type,
-			})
-		}
-		(*ret)[currLine] = append((*ret)[currLine], blocks[0])
-		for _, b := range blocks[1:] {
+	(*ret)[currLine] = append((*ret)[currLine], chunks[0])
+	if len(chunks) > 1 {
+		for _, b := range chunks[1:] {
 			x += len(b.Header)
-			/// TODO: is this it? just headerLen+x?
-			if headerLen+x > lineLengthMax {
+			/// TODO: is this it? just currLen+x?
+			if currLen+x > lineLengthMax {
 				currLine++
 				(*ret) = append((*ret), make([]block, 0, 3))
 				x = len(b.Header)
