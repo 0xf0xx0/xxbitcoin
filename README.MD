@@ -14,6 +14,7 @@ echo <hex-encoded structure> | xxbitcoin --type <data structure type>
 
 ## Bugs
 - doesnt properly chunk all strings (errors tend to be tricky)
+- alignment isnt always perfect
 
 ## TODO
 - [x] decode scripts
