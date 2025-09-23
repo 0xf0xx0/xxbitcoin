@@ -102,7 +102,7 @@ func main() {
 	// script, _ := hex.DecodeString("0237011e2f706f676f6c6f202d20646563656e7472616c697a65206f72206469652f08fe53956400000000")
 	/// edge case: error overflow >:C
 	// script, _ := hex.DecodeString("0297001a2f706f676f6c6f202d20666f73732069732066726565646f6d2f9359121200000000")
-	/// edge case: error AND op overflow >:CC
+	/// edge case: barely error overflow >:CC
 	// header, _ := hex.DecodeString("00005823301b30a68438ea562def4083f1b6151883e4858eaa1a01000000000000000000c6fe1e8c906cae6ea804a2cffbc2afe8a750985ae991fcb49e71003e3a7e16d32029d06838fa01171c223ef2")
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
@@ -255,8 +255,10 @@ func chunkData(blocks []block) [][]block {
 	for _, blk := range blocks {
 		lineLengthMax := 80
 		x := max(len(blk.Header), len(blk.Body))
-		estimatedLen := headerLen + x
-		if estimatedLen > lineLengthMax {
+		/// edge case fix: account for border width
+		estimatedLen := headerLen + x + 2
+		/// edge case fix: >= maxlen
+		if estimatedLen >= lineLengthMax {
 			switch blk.Type {
 			case DATATYPE_TIME:
 				fallthrough
@@ -268,12 +270,12 @@ func chunkData(blocks []block) [][]block {
 			case DATATYPE_ERR:
 				/// FIXME: why do long error blocks get chunked too late?
 				/// try with script 30450221009d4cdcb330786e787164a025abca8a0655f3803da66ef18d14745819b7e28b6b02200d98881bdd055ff2da39e61a858936866610c7e878ea62f08c5ee1534532c14a01
-				lineLengthMax -= 2
 				fallthrough
 			case DATATYPE_MISC:
 				fallthrough
 			case DATATYPE_HASH:
 				{
+					lineLengthMax -= 2
 					currLine, x = chunkBlock(blk, lineLengthMax, headerLen, &ret, currLine, x)
 				}
 			default:
@@ -297,21 +299,17 @@ func chunkData(blocks []block) [][]block {
 // / TODO: replace chunkStringBlock
 // / chunks a long block across multiple lines
 func chunkBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currLine int, x int) (int, int) {
-	var splitData []string
-	var splitBody []string
+	chunks := make([]block, 0, 4)
 	header := blk.Header
 	headerLen := len(header)
 	bodyLen := len(blk.Body)
 	/// -2 cause borders
-	maxRunesCurrentLine := lineLengthMax - currLen - 4
+	maxRunesCurrentLine := lineLengthMax - currLen - 2
 
-	var blocks []block
 	for i := maxRunesCurrentLine; i < headerLen+lineLengthMax; i += lineLengthMax {
 		dataStart := max(i-lineLengthMax, 0) // Previous iteration, or start of string
 		dataEnd := max(min(i, headerLen), 0) // Current iteration, or end of string
 		if dataStart != dataEnd {
-			x1 := strings.TrimSpace(string(header[dataStart:dataEnd]))
-			splitData = append(splitData, x1)
 			scale := float32(1)
 			/// if the body is longer, scale our chunking down to fit within the max width
 			if bodyLen > headerLen {
@@ -325,24 +323,29 @@ func chunkBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currL
 			start := int(float32(bodyLen) * startratio * scale)
 			/// but for the last chunk, we want to grab all remaining chars
 			/// we can safely assume the chunk is less than max width
-			if i+lineLengthMax > headerLen+lineLengthMax {
-				scale = 1
+			if i+lineLengthMax >= headerLen+lineLengthMax {
+				/// edge case workaround: split in half
+				if i == maxRunesCurrentLine {
+					scale = 0.5
+					start = int(float32(bodyLen) * startratio * scale)
+					i -= i / 2
+				} else {
+					scale = 1
+				}
 			}
 			end := int(float32(bodyLen) * endratio * scale)
-			x2 := strings.TrimSpace(string(blk.Body[start:end]))
-			splitBody = append(splitBody, x2)
 			newBlk := block{
-				Header: x1,
-				Body:   x2,
+				Header: strings.TrimSpace(string(header[dataStart:dataEnd])),
+				Body:   strings.TrimSpace(string(blk.Body[start:end])),
 				Type:   blk.Type,
 			}
-			blocks = append(blocks, newBlk)
+			chunks = append(chunks, newBlk)
 		}
 	}
 
-	(*ret)[currLine] = append((*ret)[currLine], blocks[0])
-	if len(blocks) > 1 {
-		for _, b := range blocks[1:] {
+	(*ret)[currLine] = append((*ret)[currLine], chunks[0])
+	if len(chunks) > 1 {
+		for _, b := range chunks[1:] {
 			x += len(b.Header)
 			/// TODO: is this it? just currLen+x?
 			if currLen+x > lineLengthMax {
