@@ -22,10 +22,13 @@ import (
 )
 
 const (
-	DATATYPE_UNK = iota
+	DATATYPE_ERR = iota
 	DATATYPE_OPCODE
-	DATATYPE_STRING
 	DATATYPE_NUMBER
+	DATATYPE_STRING
+	DATATYPE_HASH
+	DATATYPE_TIME
+	DATATYPE_MISC
 )
 
 type block struct {
@@ -106,11 +109,13 @@ func main() {
 func parseCoinbaseScript(script []byte) []block {
 	blks := parseScript(script)
 	blks[1].Type = DATATYPE_NUMBER
-	b := append([]byte(blks[1].Body), 0)
-	if len(b)%2 == 1 {
-		b = append([]byte(blks[1].Body), 0)
-	}
-	/// TODO: always pad to uint32?
+	/// pad to uint32
+	b := make([]byte, 4)
+	copy(b, []byte(blks[1].Body))
+	// diff := 4 - len(b)
+	// if diff > 0 {
+	// 	b = append([]byte(blks[1].Body), make([]byte, diff)...)
+	// }
 	blks[1].Body = strconv.Itoa(int(binary.LittleEndian.Uint32(b)))
 	return blks
 }
@@ -199,17 +204,17 @@ func parseBlockHeader(input []byte) []block {
 	blks[1] = block{
 		Header: prettyprintHex(prevBlockHash[:]),
 		Body:   chainhash.Hash(prevBlockHash).String(),
-		Type:   DATATYPE_UNK,
+		Type:   DATATYPE_HASH,
 	}
 	blks[2] = block{
 		Header: prettyprintHex(merkleRoot[:]),
 		Body:   chainhash.Hash(merkleRoot).String(),
-		Type:   DATATYPE_UNK,
+		Type:   DATATYPE_HASH,
 	}
 	blks[3] = block{
 		Header: prettyprintHex(blockTime),
 		Body:   time.Unix(int64(binary.LittleEndian.Uint32(blockTime)), 0).String(),
-		Type:   DATATYPE_UNK,
+		Type:   DATATYPE_TIME,
 	}
 	blks[4] = block{
 		Header: prettyprintHex(nbits),
@@ -240,23 +245,34 @@ func chunkData(blocks []block) [][]block {
 	ret := make([][]block, 1, 2)
 	headerLen := 0
 	currLine := 0
-	lineLengthMax := 80
 	/// TODO: refactor and cleanup
 	for _, blk := range blocks {
+		lineLengthMax := 80
 		x := max(len(blk.Header), len(blk.Body))
-		estimatedLen := headerLen + x + 1
+		estimatedLen := headerLen + x + 2
 		if estimatedLen > lineLengthMax {
-			if blk.Type == DATATYPE_STRING {
-				/// break it
-				currLine, x = chunkStringBlock(blk, lineLengthMax, headerLen, &ret, currLine, x)
-			} else if blk.Type == DATATYPE_UNK {
-				currLine, x = chunkBlock(blk, lineLengthMax, headerLen, &ret, currLine, x)
-			} else {
-				/// move it to the next line and blindly assume its short enough
-				/// to display without overflow
-				currLine++
-				ret = append(ret, make([]block, 0, 3))
-				ret[currLine] = append(ret[currLine], blk)
+			switch (blk.Type) {
+				case DATATYPE_TIME:
+					fallthrough
+				case DATATYPE_STRING: {
+					/// break it
+					currLine, x = chunkStringBlock(blk, lineLengthMax, headerLen, &ret, currLine, x)
+				}
+				case DATATYPE_ERR:
+					lineLengthMax -= 4
+					fallthrough
+				case DATATYPE_MISC:
+					fallthrough
+				case DATATYPE_HASH: {
+					currLine, x = chunkBlock(blk, lineLengthMax, headerLen, &ret, currLine, x)
+				}
+				default: {
+					/// move it to the next line and blindly assume its short enough
+					/// to display without overflow
+					currLine++
+					ret = append(ret, make([]block, 0, 3))
+					ret[currLine] = append(ret[currLine], blk)
+				}
 			}
 			headerLen = 0
 		} else {
@@ -273,14 +289,17 @@ func chunkBlock(blk block, lineLengthMax int, headerLen int, ret *[][]block, cur
 	var splitData []string
 	var splitBody []string
 	data := blk.Header
-	/// -2 cause borders and then -4 cause hex string
-	maxRunesCurrentLine := (lineLengthMax - headerLen) - 6
+	/// -2 cause borders and then -2 cause hex string
+	maxRunesCurrentLine := (lineLengthMax - headerLen) - 4
 
 	for i := maxRunesCurrentLine; i < len(data)+lineLengthMax; i += lineLengthMax {
 		dataStart := max(i-lineLengthMax, 0) // Previous iteration, or start of string
 		dataEnd := max(min(i, len(data)), 0) // Current iteration, or end of string
 		if dataStart != dataEnd {
 			splitData = append(splitData, strings.TrimSpace(string(data[dataStart:dataEnd])))
+			/// take a bite out of the header too
+			/// for string this is nice cause its always a 3:1 ratio, so we'll always
+			/// select whole bytes
 			startratio := float32(0)
 			endratio := float32(dataEnd) / float32(len(data))
 			if dataStart > 0 {
@@ -320,24 +339,34 @@ func chunkBlock(blk block, lineLengthMax int, headerLen int, ret *[][]block, cur
 // / same as chunkBlock but optimized for strings
 func chunkStringBlock(blk block, lineLengthMax int, headerLen int, ret *[][]block, currLine int, x int) (int, int) {
 	var splitData []string
+	var splitHdr []string
 	data := blk.Body
-	/// -2 cause borders
-	maxRunesCurrentLine := (lineLengthMax-headerLen)/3 - 2
+	/// -4 cause borders? i think? majik number that seems to work
+	maxRunesCurrentLine := (lineLengthMax-headerLen-4)/3
 	// Second term has lengthLineMax/3 added; for data of length 27 and line length 15, I'll want to create one slice at [0,15] and a second at [15,27] (clamping 30 to 27), so the loop needs to go "one past"
 	for i := maxRunesCurrentLine; i < len(data)+lineLengthMax/3; i += lineLengthMax / 3 {
 		dataStart := max(i-lineLengthMax/3, 0) // Previous iteration, or start of string
 		dataEnd := max(min(i, len(data)), 0)   // Current iteration, or end of string
 		if dataStart != dataEnd {
 			splitData = append(splitData, string(data[dataStart:dataEnd]))
+			startratio := float32(0)
+			endratio := float32(dataEnd) / float32(len(data))
+			if dataStart > 0 {
+				startratio = float32(dataStart) / float32(len(data))
+			}
+			start := int(float32(len(blk.Header)) * startratio)
+			end := int(float32(len(blk.Header)) * endratio)
+			splitHdr = append(splitHdr, strings.TrimSpace(string(blk.Header[start:end])))
 		}
 	}
 	if len(splitData) == 0 {
 		(*ret)[currLine] = append((*ret)[currLine], blk)
 	} else {
 		var blocks []block
-		for _, d := range splitData {
+		for x, d := range splitData {
+			x = x
 			blocks = append(blocks, block{
-				Header: prettyprintHex([]byte(d)),
+				Header: splitHdr[x],
 				Body:   d,
 				Type:   blk.Type,
 			})
@@ -426,34 +455,43 @@ func mergeBoxes(boxes []block) string {
 }
 
 func replaceNonPrintable(input string) string {
-	result := []rune{}
+	result := strings.Builder{}
+	result.Grow(len(input))
 
 	for _, r := range input {
 		if unicode.IsPrint(r) && (r >= 0x20 && r <= 0x7E) {
-			result = append(result, r)
+			result.WriteRune(r)
 		} else {
-			result = append(result, '.')
+			result.WriteByte('.')
 		}
 	}
 
-	return string(result)
+	return result.String()
 }
 func colorText(datatype int, text string) string {
-	color := ""
+	color := "whitebright"
 	switch datatype {
+	case DATATYPE_TIME:
+		fallthrough
 	case DATATYPE_NUMBER:
 		{
 			color = "blue"
 		}
+	case DATATYPE_HASH:
+		fallthrough
 	case DATATYPE_STRING:
 		{
 			color = "green"
+		}
+	case DATATYPE_MISC:
+		{
+			color = "magenta"
 		}
 	case DATATYPE_OPCODE:
 		{
 			color = "yellow"
 		}
-	case DATATYPE_UNK:
+	case DATATYPE_ERR:
 		{
 			color = "red"
 		}
