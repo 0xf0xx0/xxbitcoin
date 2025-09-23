@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -44,7 +45,6 @@ func main() {
 		Version:                "0.0.1",
 		UseShortOptionHandling: true,
 		EnableShellCompletion:  true,
-		ReadArgsFromStdin:      true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:     "type",
@@ -57,9 +57,16 @@ func main() {
 			blks := []block{}
 			rawInput := ctx.Args().Get(0)
 			if len(rawInput) == 0 {
-				return fmt.Errorf("no input")
+				b, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					panic(err)
+				}
+				if len(b) == 0 {
+					return fmt.Errorf("no input")
+				}
+				rawInput = string(b)
 			}
-			input, err := hex.DecodeString(rawInput)
+			input, err := hex.DecodeString(strings.TrimSpace(rawInput))
 			if err != nil {
 				println(rawInput)
 				return err
@@ -325,10 +332,10 @@ func chunkBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currL
 			/// we can safely assume the chunk is less than max width
 			if i+lineLengthMax >= headerLen+lineLengthMax {
 				/// edge case workaround: split in half
+				/// half-works
 				if i == maxRunesCurrentLine {
 					scale = 0.5
-					start = int(float32(bodyLen) * startratio * scale)
-					i -= i / 2
+					i = int(float32(i) * scale)
 				} else {
 					scale = 1
 				}
