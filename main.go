@@ -68,7 +68,6 @@ func main() {
 			}
 			input, err := hex.DecodeString(strings.TrimSpace(rawInput))
 			if err != nil {
-				println(rawInput)
 				return err
 			}
 			switch ctx.String("type") {
@@ -90,7 +89,7 @@ func main() {
 				}
 			}
 			for _, line := range chunkData(blks) {
-				println(fmt.Sprintf("%s", mergeBoxes(line)))
+				fmt.Printf("%s\n", mergeBoxes(line))
 			}
 			return nil
 		},
