@@ -93,12 +93,16 @@ func main() {
 	/// foundry usa 915753
 	// script, _ := hex.DecodeString("0329f90d041b21d0682f466f756e6472792055534120506f6f6c202364726f70676f6c642ffabe6d6d5c91db6d6adc594b6223bf953075281941f2450c5ba328544b7e04dcdc177d9901000000000000007c0134999e620d0000000000")
 	/// slushpool 915754
+	/// edge case: string chunk overflow
 	// script, _ := hex.DecodeString("032af90d102f736c7573682f6500b006a066120e01fabe6d6d560a0f5f0cf3bd4dbfc58629a834166b021716b115cc267ba92822755946c705100000000000000000007b434d00000000000000")
 
+	/// edge case: op overflow
 	// script, _ := hex.DecodeString("47304402204113c4e58ccdedb5b633483720f8e9837b89c58847d6e4d033c576a5e2a295f702200b867d08291f884e491772b61fd03127a1e0efbdef87442c97f334d1aa4aef9901410426cbe208d7e5bf3b5b38ab0b05d0ddd8ef8ea06fe946d622ce5db29a27d3d020b3ffa629dda1201323b1dada376867201df1de49455e898ecc315511a84507da")
-	// script, _ := hex.DecodeString("0237011e2f706f676f6c6f202d20646563656e7472616c697a65206f72206469652f08fe53956400000000")
-	// script, _ := hex.DecodeString("0297001a2f706f676f6c6f202d20666f73732069732066726565646f6d2f9359121200000000")
 
+	// script, _ := hex.DecodeString("0237011e2f706f676f6c6f202d20646563656e7472616c697a65206f72206469652f08fe53956400000000")
+	/// edge case: error overflow >:C
+	// script, _ := hex.DecodeString("0297001a2f706f676f6c6f202d20666f73732069732066726565646f6d2f9359121200000000")
+	/// edge case: error AND op overflow >:CC
 	// header, _ := hex.DecodeString("00005823301b30a68438ea562def4083f1b6151883e4858eaa1a01000000000000000000c6fe1e8c906cae6ea804a2cffbc2afe8a750985ae991fcb49e71003e3a7e16d32029d06838fa01171c223ef2")
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
@@ -251,7 +255,7 @@ func chunkData(blocks []block) [][]block {
 	for _, blk := range blocks {
 		lineLengthMax := 80
 		x := max(len(blk.Header), len(blk.Body))
-		estimatedLen := headerLen + x + 2
+		estimatedLen := headerLen + x
 		if estimatedLen > lineLengthMax {
 			switch blk.Type {
 			case DATATYPE_TIME:
@@ -264,7 +268,7 @@ func chunkData(blocks []block) [][]block {
 			case DATATYPE_ERR:
 				/// FIXME: why do long error blocks get chunked too late?
 				/// try with script 30450221009d4cdcb330786e787164a025abca8a0655f3803da66ef18d14745819b7e28b6b02200d98881bdd055ff2da39e61a858936866610c7e878ea62f08c5ee1534532c14a01
-				// lineLengthMax -= 2
+				lineLengthMax -= 2
 				fallthrough
 			case DATATYPE_MISC:
 				fallthrough
@@ -358,21 +362,22 @@ func chunkStringBlock(blk block, lineLengthMax int, headerLen int, ret *[][]bloc
 	var splitData []string
 	var splitHdr []string
 	data := blk.Body
+	dataLen := len(data)
 	/// -4 cause borders? i think? majik number that seems to work
 	maxRunesCurrentLine := (lineLengthMax - headerLen - 4) / 3
 	// Second term has lengthLineMax/3 added; for data of length 27 and line length 15, I'll want to create one slice at [0,15] and a second at [15,27] (clamping 30 to 27), so the loop needs to go "one past"
-	for i := maxRunesCurrentLine; i < len(data)+lineLengthMax/3; i += lineLengthMax / 3 {
+	for i := maxRunesCurrentLine; i < dataLen+lineLengthMax/3; i += lineLengthMax / 3 {
 		dataStart := max(i-lineLengthMax/3, 0) // Previous iteration, or start of string
-		dataEnd := max(min(i, len(data)), 0)   // Current iteration, or end of string
+		dataEnd := max(min(i, dataLen), 0)   // Current iteration, or end of string
 		if dataStart != dataEnd {
-			splitData = append(splitData, string(data[dataStart:dataEnd]))
+			splitData = append(splitData, data[dataStart:dataEnd])
 			/// take a bite out of the header too
 			/// for string this is nice cause its always a 3:1 ratio, so we'll always
 			/// select whole bytes
 			startratio := float32(0)
-			endratio := float32(dataEnd) / float32(len(data))
+			endratio := float32(dataEnd) / float32(dataLen)
 			if dataStart > 0 {
-				startratio = float32(dataStart) / float32(len(data))
+				startratio = float32(dataStart) / float32(dataLen)
 			}
 			start := int(float32(len(blk.Header)) * startratio)
 			end := int(float32(len(blk.Header)) * endratio)
