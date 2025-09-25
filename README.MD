@@ -2,6 +2,8 @@
 
 pretty-prints various bitcoin data structures
 
+kinda like fd but less technical and bitcoin-focused
+
 ## Usage
 
 ```
@@ -25,7 +27,8 @@ echo <hex-encoded structure> | xxbitcoin --type <data structure type>
 
 ## TODO
 
-- [ ] decode transactions?
+- [ ] decode transactions
+- [ ] decode blocks
 - [x] chunk errors (mostly works)
 - [ ] error handling
 - [ ] allow for different window sizes?

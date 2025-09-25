@@ -18,6 +18,7 @@ import (
 	"github.com/Delta456/box-cli-maker/v2"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/gookit/color"
 	"github.com/urfave/cli/v3"
 )
@@ -41,7 +42,6 @@ func main() {
 	app := &cli.Command{
 		Name:                   "xxbitcoin",
 		Usage:                  "pretty-prints bitcoin structures",
-		UsageText:              "xxbitcoin [options]",
 		Version:                "0.0.1",
 		UseShortOptionHandling: true,
 		EnableShellCompletion:  true,
@@ -185,6 +185,7 @@ func parseScript(script []byte) []block {
 	return blks
 }
 
+/// most of these are manually parsed so we get access to the raw bytes
 func parseBlockHeader(input []byte) []block {
 	buf := bytes.NewBuffer(input)
 	blks := make([]block, 6)
@@ -237,6 +238,13 @@ func parseBlockHeader(input []byte) []block {
 	}
 	return blks
 }
+func parseTransaction(rawtxn []byte) []block {
+	buf := bytes.NewBuffer(rawtxn)
+	ver := make([]byte, 4)
+	txincount := readCompactSize(buf)
+}
+func parseCoinbaseTransaction(rawtxn []byte) []block
+func parseFullBlock(rawtxn []byte) []block
 
 // / "b00b69" -> "b0 0b 69"
 func prettyprintHex(b []byte) string {
@@ -251,6 +259,39 @@ func prettyprintHex(b []byte) string {
 	}
 	return ret
 }
+
+func readCompactSize(buf *bytes.Buffer) int {
+	initial, _ := buf.ReadByte()
+	switch initial {
+	/// uint16
+	case 0xfd:
+		{
+			num := make([]byte, 2)
+			buf.Read(num)
+			return int(binary.LittleEndian.Uint16(num))
+		}
+	/// uint32
+	case 0xfe:
+		{
+			num := make([]byte, 4)
+			buf.Read(num)
+			return int(binary.LittleEndian.Uint32(num))
+		}
+	/// uint64
+	case 0xff:
+		{
+			num := make([]byte, 8)
+			buf.Read(num)
+			return int(binary.LittleEndian.Uint64(num))
+		}
+	/// uin8
+	default:
+		{
+			return int(binary.LittleEndian.Uint16([]byte{initial, 0x0}))
+		}
+	}
+}
+
 
 // / chunk a line of blocks into multiple lines
 func chunkData(blocks []block) [][]block {
