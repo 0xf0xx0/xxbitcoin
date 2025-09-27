@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,9 +17,9 @@ import (
 
 	"github.com/0xf0xx0/oigiki"
 	"github.com/Delta456/box-cli-maker/v2"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/gookit/color"
 	"github.com/urfave/cli/v3"
 )
@@ -28,7 +29,7 @@ const (
 	DATATYPE_OPCODE
 	DATATYPE_NUMBER
 	DATATYPE_STRING
-	DATATYPE_HASH
+	DATATYPE_HEX
 	DATATYPE_TIME
 	DATATYPE_MISC
 )
@@ -55,6 +56,8 @@ func main() {
 		},
 		Action: func(_ context.Context, ctx *cli.Command) error {
 			blks := []block{}
+
+			/// TODO: handle binary
 			rawInput := ctx.Args().Get(0)
 			if len(rawInput) == 0 {
 				b, err := io.ReadAll(os.Stdin)
@@ -82,6 +85,14 @@ func main() {
 			case "header":
 				{
 					blks = parseBlockHeader(input)
+				}
+			case "tx":
+				{
+					blks = parseTransaction(input, false)
+				}
+			case "coinbasetx":
+				{
+					blks = parseTransaction(input, true)
 				}
 			default:
 				{
@@ -121,10 +132,6 @@ func parseCoinbaseScript(script []byte) []block {
 	/// pad to uint32
 	b := make([]byte, 4)
 	copy(b, []byte(blks[1].Body))
-	// diff := 4 - len(b)
-	// if diff > 0 {
-	// 	b = append([]byte(blks[1].Body), make([]byte, diff)...)
-	// }
 	blks[1].Body = strconv.Itoa(int(binary.LittleEndian.Uint32(b)))
 	return blks
 }
@@ -185,7 +192,7 @@ func parseScript(script []byte) []block {
 	return blks
 }
 
-/// most of these are manually parsed so we get access to the raw bytes
+// / most of these are manually parsed so we get access to the raw bytes
 func parseBlockHeader(input []byte) []block {
 	buf := bytes.NewBuffer(input)
 	blks := make([]block, 6)
@@ -214,12 +221,12 @@ func parseBlockHeader(input []byte) []block {
 	blks[1] = block{
 		Header: prettyprintHex(prevBlockHash[:]),
 		Body:   chainhash.Hash(prevBlockHash).String(),
-		Type:   DATATYPE_HASH,
+		Type:   DATATYPE_HEX,
 	}
 	blks[2] = block{
 		Header: prettyprintHex(merkleRoot[:]),
 		Body:   chainhash.Hash(merkleRoot).String(),
-		Type:   DATATYPE_HASH,
+		Type:   DATATYPE_HEX,
 	}
 	blks[3] = block{
 		Header: prettyprintHex(blockTime),
@@ -238,13 +245,75 @@ func parseBlockHeader(input []byte) []block {
 	}
 	return blks
 }
-func parseTransaction(rawtxn []byte) []block {
+/// bip 141
+func parseTransaction(rawtxn []byte, isCoinbase bool) []block {
+	blks := make([]block, 0, 20)
 	buf := bytes.NewBuffer(rawtxn)
 	ver := make([]byte, 4)
-	txincount := readCompactSize(buf)
+	buf.Read(ver)
+	blks = append(blks, block{
+		Header: prettyprintHex(ver),
+		Body:   strconv.Itoa(int(binary.LittleEndian.Uint32(ver))),
+		Type:   DATATYPE_NUMBER,
+	})
+
+	isWitness := false
+	/// "peek" at the next byte
+	if buf.Bytes()[0] == 0 {
+		isWitness = true
+		marker, _ := buf.ReadByte()
+		flag, _ := buf.ReadByte()
+		blks = append(blks, block{
+			Header: prettyprintHex([]byte{marker}),
+			Body:   strconv.Itoa(int(binary.LittleEndian.Uint16([]byte{marker, 0}))),
+			Type:   DATATYPE_NUMBER,
+		}, block{
+			Header: prettyprintHex([]byte{flag}),
+			Body:   strconv.Itoa(int(binary.LittleEndian.Uint16([]byte{flag, 0}))),
+			Type:   DATATYPE_NUMBER,
+		})
+	}
+
+	txInCount, txInCountBlk := readCompactSize(buf)
+	blks = append(blks, txInCountBlk)
+	slices.Grow(blks, txInCount*13) /// prevout+scriptlen+sequence makes 3, then 10 for the script
+	for i := 0; i < txInCount; i++ {
+		b := readTxin(buf, isCoinbase)
+		blks = append(blks, b...)
+	}
+	txOutCount, txOutCountBlk := readCompactSize(buf)
+	blks = append(blks, txOutCountBlk)
+	isWitness = isWitness
+	slices.Grow(blks, txOutCount*12)
+	for i := 0; i < txOutCount; i++ {
+		blks = append(blks, readTxout(buf)...)
+	}
+	isWitness = isWitness
+	if isWitness {
+		for i := 0; i < txInCount; i++ {
+			count, sizeblk := readCompactSize(buf)
+			blks = append(blks, sizeblk)
+			for ii := 0; ii < count; ii++ {
+				len, sizeblk := readCompactSize(buf)
+				blks = append(blks, sizeblk)
+				if len == 0 {
+					continue
+				}
+				witness := make([]byte, len)
+				buf.Read(witness)
+				blks = append(blks, block{
+					Header: prettyprintHex(witness),
+					Body:   hex.EncodeToString(witness),
+					Type:   DATATYPE_HEX,
+				})
+			}
+		}
+	}
+	blks = append(blks, readLocktime(buf))
+	return blks
 }
-func parseCoinbaseTransaction(rawtxn []byte) []block
-func parseFullBlock(rawtxn []byte) []block
+
+// func parseFullBlock(rawtxn []byte) []block
 
 // / "b00b69" -> "b0 0b 69"
 func prettyprintHex(b []byte) string {
@@ -260,70 +329,165 @@ func prettyprintHex(b []byte) string {
 	return ret
 }
 
-func readCompactSize(buf *bytes.Buffer) int {
+func readCompactSize(buf *bytes.Buffer) (int, block) {
 	initial, _ := buf.ReadByte()
+	res := 0
+	num := []byte{}
+
 	switch initial {
 	/// uint16
 	case 0xfd:
 		{
-			num := make([]byte, 2)
+			num = make([]byte, 2)
 			buf.Read(num)
-			return int(binary.LittleEndian.Uint16(num))
+			res = int(binary.LittleEndian.Uint16(num))
 		}
 	/// uint32
 	case 0xfe:
 		{
-			num := make([]byte, 4)
+			num = make([]byte, 4)
 			buf.Read(num)
-			return int(binary.LittleEndian.Uint32(num))
+			res = int(binary.LittleEndian.Uint32(num))
 		}
 	/// uint64
 	case 0xff:
 		{
-			num := make([]byte, 8)
+			num = make([]byte, 8)
 			buf.Read(num)
-			return int(binary.LittleEndian.Uint64(num))
+			res = int(binary.LittleEndian.Uint64(num))
 		}
 	/// uin8
 	default:
 		{
-			return int(binary.LittleEndian.Uint16([]byte{initial, 0x0}))
+			num = []byte{initial}
+			res = int(binary.LittleEndian.Uint16([]byte{initial, 0x0}))
 		}
 	}
+	blk := block{
+		Header: prettyprintHex(num),
+		Body:   strconv.Itoa(res),
+		Type:   DATATYPE_NUMBER,
+	}
+	return res, blk
+}
+func readTxin(buf *bytes.Buffer, isCoinbase bool) []block {
+	blks := make([]block, 3, 13)
+	prevout := make([]byte, 32)
+	buf.Read(prevout)
+	blks[0] = block{
+		Header: prettyprintHex(prevout),
+		Body:   chainhash.Hash(prevout).String(),
+		Type:   DATATYPE_HEX,
+	}
+	vout := make([]byte, 4)
+	buf.Read(vout)
+	blks[1] = block{
+		Header: prettyprintHex(vout),
+		Body:   strconv.Itoa(int(binary.LittleEndian.Uint32(vout))),
+		Type:   DATATYPE_NUMBER,
+	}
+	scriptLen, scriptLenBlk := readCompactSize(buf)
+	blks[2] = scriptLenBlk
+	if scriptLen > 0 {
+		script := make([]byte, scriptLen)
+		buf.Read(script)
+		if isCoinbase {
+			blks = append(blks, parseCoinbaseScript(script)...)
+		} else {
+			blks = append(blks, parseScript(script)...)
+		}
+	}
+	sequence := make([]byte, 4)
+	buf.Read(sequence)
+	blks = append(blks, block{
+		Header: prettyprintHex(sequence),
+		Body:   strconv.Itoa(int(binary.LittleEndian.Uint32(sequence))),
+		Type:   DATATYPE_NUMBER,
+	})
+	return blks
+}
+func readTxout(buf *bytes.Buffer) []block {
+	blks := make([]block, 2, 12) /// 2 + 10 for script
+	value := make([]byte, 8)
+	buf.Read(value)
+	pkLen, pkLenBlk := readCompactSize(buf)
+	pkscript := make([]byte, pkLen)
+	buf.Read(pkscript)
+	blks[0] = block{
+		Header: prettyprintHex(value),
+		/// TODO: pretty-print more as btc value (0.1btc, 5msat, etc)
+		Body: btcutil.Amount(binary.LittleEndian.Uint64(value)).Format(btcutil.AmountBTC),
+		// Body: strconv.Itoa(int(binary.LittleEndian.Uint64(value))),
+		Type: DATATYPE_NUMBER,
+	}
+	blks[1] = pkLenBlk
+	/// TODO: decode addr
+	// addr :=
+	blks = append(blks, parseScript(pkscript)...)
+	return blks
 }
 
+// https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number
+func readLocktime(buf *bytes.Buffer) block {
+	rawtime := make([]byte, 4)
+	buf.Read(rawtime)
+	t := int64(binary.LittleEndian.Uint32(rawtime))
+	blk := block{
+		Header: prettyprintHex(rawtime),
+	}
+	if t >= 500_000_000 {
+		blk.Body = time.Unix(t, 0).String()
+		blk.Type = DATATYPE_TIME
+		return blk
+	}
+	blk.Body = strconv.Itoa(int(t))
+	blk.Type = DATATYPE_NUMBER
+	return blk
+}
 
 // / chunk a line of blocks into multiple lines
 func chunkData(blocks []block) [][]block {
 	ret := make([][]block, 1, 2)
-	headerLen := 0
+	currLineLen := 0
 	currLine := 0
 	/// TODO: refactor and cleanup
 	for _, blk := range blocks {
 		lineLengthMax := 80
-		x := max(len(blk.Header), len(blk.Body))
 		/// edge case fix: account for border width
-		estimatedLen := headerLen + x + 2
+		x := max(len(blk.Header), len(blk.Body)) + 2
+		/// blocks strung after the furst only have one new border
+		if len(ret[currLine]) > 1 {
+			x -= 1
+		}
+		/// edge case fix: start on newline if the current line is already too long
+		if currLineLen >= lineLengthMax {
+			currLine++
+			ret = append(ret, make([]block, 0, 3))
+			currLineLen -= lineLengthMax
+		}
+		/// FIXME: main issue? this becomes desynced from the actual width
+		estimatedLen := currLineLen + x
+		println(fmt.Sprintf("idx: %d:%d; est len: %d; body: %q", currLine, currLineLen, estimatedLen, replaceNonPrintable(blk.Body)))
 		/// edge case fix: >= maxlen
 		if estimatedLen >= lineLengthMax {
+			/// shared chunking
 			switch blk.Type {
 			case DATATYPE_TIME:
 				fallthrough
 			case DATATYPE_STRING:
 				{
 					/// break it
-					currLine, x = chunkStringBlock(blk, lineLengthMax, headerLen, &ret, currLine, x)
+					currLine, x = chunkStringBlock(blk, lineLengthMax, currLineLen, &ret, currLine, x)
 				}
+			case DATATYPE_HEX:
+				fallthrough
 			case DATATYPE_ERR:
 				/// FIXME: why do long error blocks get chunked too late?
 				/// try with script 30450221009d4cdcb330786e787164a025abca8a0655f3803da66ef18d14745819b7e28b6b02200d98881bdd055ff2da39e61a858936866610c7e878ea62f08c5ee1534532c14a01
 				fallthrough
 			case DATATYPE_MISC:
-				fallthrough
-			case DATATYPE_HASH:
 				{
-					lineLengthMax -= 2
-					currLine, x = chunkBlock(blk, lineLengthMax, headerLen, &ret, currLine, x)
+					currLine, x = chunkBlock(blk, lineLengthMax, currLineLen, &ret, currLine, x)
 				}
 			default:
 				{
@@ -334,11 +498,11 @@ func chunkData(blocks []block) [][]block {
 					ret[currLine] = append(ret[currLine], blk)
 				}
 			}
-			headerLen = 0
+			currLineLen = 0
 		} else {
 			ret[currLine] = append(ret[currLine], blk)
 		}
-		headerLen += x
+		currLineLen += x
 	}
 	return ret
 }
@@ -350,24 +514,25 @@ func chunkBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currL
 	header := blk.Header
 	headerLen := len(header)
 	bodyLen := len(blk.Body)
-	/// -2 cause borders
-	maxRunesCurrentLine := lineLengthMax - currLen - 2
+
+	maxRunesCurrentLine := lineLengthMax - currLen
 
 	for i := maxRunesCurrentLine; i < headerLen+lineLengthMax; i += lineLengthMax {
-		dataStart := max(i-lineLengthMax, 0) // Previous iteration, or start of string
-		dataEnd := max(min(i, headerLen), 0) // Current iteration, or end of string
+		/// FIXME: ensure this doesnt lose bytes and/or replace with something thats better
+		dataStart := max(i-lineLengthMax-((i-lineLengthMax)%3), 0) // Previous iteration, or start of string
+		dataEnd := max(min(i-(i%3), headerLen), 0)                 // Current iteration, or end of string
 		if dataStart != dataEnd {
-			scale := float32(1)
+			scale := float64(1)
 			/// if the body is longer, scale our chunking down to fit within the max width
 			if bodyLen > headerLen {
-				scale = float32(headerLen) / float32(bodyLen)
+				scale = float64(headerLen) / float64(bodyLen)
 			}
-			startratio := float32(0)
-			endratio := float32(dataEnd) / float32(headerLen)
+			startratio := float64(0)
+			endratio := float64(dataEnd) / float64(headerLen)
 			if dataStart > 0 {
-				startratio = float32(dataStart) / float32(headerLen)
+				startratio = float64(dataStart) / float64(headerLen)
 			}
-			start := int(float32(bodyLen) * startratio * scale)
+			start := int(float64(bodyLen) * startratio * scale)
 			/// but for the last chunk, we want to grab all remaining chars
 			/// we can safely assume the chunk is less than max width
 			if i+lineLengthMax >= headerLen+lineLengthMax {
@@ -375,30 +540,35 @@ func chunkBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currL
 				/// half-works
 				if i == maxRunesCurrentLine {
 					scale = 0.5
-					i = int(float32(i) * scale)
+					i = int(float64(i) * scale)
 				} else {
 					scale = 1
 				}
 			}
-			end := int(float32(bodyLen) * endratio * scale)
+			end := int(float64(bodyLen) * endratio * scale)
 			newBlk := block{
 				Header: strings.TrimSpace(string(header[dataStart:dataEnd])),
 				Body:   strings.TrimSpace(string(blk.Body[start:end])),
 				Type:   blk.Type,
 			}
 			chunks = append(chunks, newBlk)
+			// lastEnd = dataEnd
 		}
 	}
 
 	(*ret)[currLine] = append((*ret)[currLine], chunks[0])
+	x++
 	if len(chunks) > 1 {
 		for _, b := range chunks[1:] {
-			x += len(b.Header)
+			m := max(len(b.Header), len(b.Body))
+			/// +1 for border
+			x += m + 1
 			/// TODO: is this it? just currLen+x?
-			if currLen+x > lineLengthMax {
+			if currLen+x >= lineLengthMax {
 				currLine++
 				(*ret) = append((*ret), make([]block, 0, 3))
-				x = len(b.Header)
+				/// fresh line, both borders are included
+				x = m + 2
 			}
 			(*ret)[currLine] = append((*ret)[currLine], b)
 		}
@@ -412,8 +582,13 @@ func chunkStringBlock(blk block, lineLengthMax int, currLen int, ret *[][]block,
 	chunks := make([]block, 0, 4)
 	data := blk.Body
 	dataLen := len(data)
-	/// -4 cause borders? i think? majik number that seems to work
-	maxRunesCurrentLine := (lineLengthMax - currLen - 4) / 3
+	/// edge case fix: start on newline
+	if currLen >= lineLengthMax {
+		currLine++
+		(*ret) = append((*ret), make([]block, 0, 3))
+		currLen -= lineLengthMax
+	}
+	maxRunesCurrentLine := (lineLengthMax - currLen) / 3
 	// Second term has lengthLineMax/3 added; for data of length 27 and line length 15, I'll want to create one slice at [0,15] and a second at [15,27] (clamping 30 to 27), so the loop needs to go "one past"
 	for i := maxRunesCurrentLine; i < dataLen+lineLengthMax/3; i += lineLengthMax / 3 {
 		dataStart := max(i-lineLengthMax/3, 0) // Previous iteration, or start of string
@@ -439,6 +614,7 @@ func chunkStringBlock(blk block, lineLengthMax int, currLen int, ret *[][]block,
 		}
 	}
 	(*ret)[currLine] = append((*ret)[currLine], chunks[0])
+	x++
 	if len(chunks) > 1 {
 		for _, b := range chunks[1:] {
 			x += len(b.Header)
@@ -545,7 +721,7 @@ func colorText(datatype int, text string) string {
 		{
 			color = "blue"
 		}
-	case DATATYPE_HASH:
+	case DATATYPE_HEX:
 		fallthrough
 	case DATATYPE_STRING:
 		{

@@ -26,9 +26,12 @@ echo <hex-encoded structure> | xxbitcoin --type <data structure type>
 - like zero error handling (for now)
 
 ## TODO
-
-- [ ] decode transactions
+- [ ] refactor to a more modular system
+- [ ] refactor chunking
+    - [ ] always split around hex bytes in header
+- [ ] accept raw binary as input
+- [x] decode transactions
+    - decode txout destinations?
 - [ ] decode blocks
-- [x] chunk errors (mostly works)
 - [ ] error handling
 - [ ] allow for different window sizes?
