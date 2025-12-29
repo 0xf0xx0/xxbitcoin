@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -24,19 +25,9 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-const (
-	DATATYPE_ERR = iota
-	DATATYPE_OPCODE
-	DATATYPE_NUMBER
-	DATATYPE_STRING
-	DATATYPE_HEX
-	DATATYPE_TIME
-	DATATYPE_MISC
-)
-
 type block struct {
 	Header, Body string
-	Type         int
+	Type         datatype
 }
 
 func main() {
@@ -165,6 +156,7 @@ func parseScript(script []byte) []block {
 			blk2 := block{
 				Header: prettyprintHex(tkzr.Script()[tkzr.ByteIndex()+1:]),
 				Body:   err.Error(),
+				Type:   DATATYPE_ERR,
 			}
 			blks = append(blks, blk, blk2)
 			break
@@ -245,7 +237,8 @@ func parseBlockHeader(input []byte) []block {
 	}
 	return blks
 }
-/// bip 141
+
+// / bip 141
 func parseTransaction(rawtxn []byte, isCoinbase bool) []block {
 	blks := make([]block, 0, 20)
 	buf := bytes.NewBuffer(rawtxn)
@@ -445,19 +438,19 @@ func readLocktime(buf *bytes.Buffer) block {
 	return blk
 }
 
-// / chunk a line of blocks into multiple lines
+// chunk a line of blocks into multiple lines
 func chunkData(blocks []block) [][]block {
 	ret := make([][]block, 1, 2)
 	currLineLen := 0
 	currLine := 0
+	lineLengthMax := 80
 	/// TODO: refactor and cleanup
 	for _, blk := range blocks {
-		lineLengthMax := 80
-		/// edge case fix: account for border width
-		x := max(len(blk.Header), len(blk.Body)) + 2
+		/// account for border width
+		blkWidth := max(len(blk.Header), len(blk.Body)) + 2
 		/// blocks strung after the furst only have one new border
 		if len(ret[currLine]) > 1 {
-			x -= 1
+			blkWidth -= 1
 		}
 		/// edge case fix: start on newline if the current line is already too long
 		if currLineLen >= lineLengthMax {
@@ -466,9 +459,9 @@ func chunkData(blocks []block) [][]block {
 			currLineLen -= lineLengthMax
 		}
 		/// FIXME: main issue? this becomes desynced from the actual width
-		estimatedLen := currLineLen + x
-		println(fmt.Sprintf("idx: %d:%d; est len: %d; body: %q", currLine, currLineLen, estimatedLen, replaceNonPrintable(blk.Body)))
-		/// edge case fix: >= maxlen
+		estimatedLen := currLineLen + blkWidth
+		println(fmt.Sprintf("idx: %d:%d; est len: %d; body: %q; type: %s", currLine, currLineLen, estimatedLen, replaceNonPrintable(blk.Body), blk.Type))
+
 		if estimatedLen >= lineLengthMax {
 			/// shared chunking
 			switch blk.Type {
@@ -477,17 +470,17 @@ func chunkData(blocks []block) [][]block {
 			case DATATYPE_STRING:
 				{
 					/// break it
-					currLine, x = chunkStringBlock(blk, lineLengthMax, currLineLen, &ret, currLine, x)
+					currLine, blkWidth = chunkStringBlock(blk, lineLengthMax, currLineLen, &ret, currLine, blkWidth)
 				}
 			case DATATYPE_HEX:
 				fallthrough
-			case DATATYPE_ERR:
-				/// FIXME: why do long error blocks get chunked too late?
-				/// try with script 30450221009d4cdcb330786e787164a025abca8a0655f3803da66ef18d14745819b7e28b6b02200d98881bdd055ff2da39e61a858936866610c7e878ea62f08c5ee1534532c14a01
-				fallthrough
+			// case DATATYPE_ERR:
+			/// TODO: special error chunking
+			/// try with script 30450221009d4cdcb330786e787164a025abca8a0655f3803da66ef18d14745819b7e28b6b02200d98881bdd055ff2da39e61a858936866610c7e878ea62f08c5ee1534532c14a01
+			// fallthrough
 			case DATATYPE_MISC:
 				{
-					currLine, x = chunkBlock(blk, lineLengthMax, currLineLen, &ret, currLine, x)
+					currLine, blkWidth = chunkHexBlock(blk, lineLengthMax, currLineLen, &ret, currLine, blkWidth)
 				}
 			default:
 				{
@@ -502,58 +495,48 @@ func chunkData(blocks []block) [][]block {
 		} else {
 			ret[currLine] = append(ret[currLine], blk)
 		}
-		currLineLen += x
+		currLineLen += blkWidth
 	}
 	return ret
 }
 
-// / TODO: replace chunkStringBlock
-// / chunks a long block across multiple lines
-func chunkBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currLine int, x int) (int, int) {
+// chunks a long block across multiple lines
+func chunkHexBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currLine int, x int) (int, int) {
 	chunks := make([]block, 0, 4)
-	header := blk.Header
-	headerLen := len(header)
-	bodyLen := len(blk.Body)
+	blkWidth := max(len(blk.Body), len(blk.Header))
 
 	maxRunesCurrentLine := lineLengthMax - currLen
 
-	for i := maxRunesCurrentLine; i < headerLen+lineLengthMax; i += lineLengthMax {
-		/// FIXME: ensure this doesnt lose bytes and/or replace with something thats better
-		dataStart := max(i-lineLengthMax-((i-lineLengthMax)%3), 0) // Previous iteration, or start of string
-		dataEnd := max(min(i-(i%3), headerLen), 0)                 // Current iteration, or end of string
-		if dataStart != dataEnd {
-			scale := float64(1)
-			/// if the body is longer, scale our chunking down to fit within the max width
-			if bodyLen > headerLen {
-				scale = float64(headerLen) / float64(bodyLen)
-			}
-			startratio := float64(0)
-			endratio := float64(dataEnd) / float64(headerLen)
-			if dataStart > 0 {
-				startratio = float64(dataStart) / float64(headerLen)
-			}
-			start := int(float64(bodyLen) * startratio * scale)
-			/// but for the last chunk, we want to grab all remaining chars
-			/// we can safely assume the chunk is less than max width
-			if i+lineLengthMax >= headerLen+lineLengthMax {
-				/// edge case workaround: split in half
-				/// half-works
-				if i == maxRunesCurrentLine {
-					scale = 0.5
-					i = int(float64(i) * scale)
-				} else {
-					scale = 1
-				}
-			}
-			end := int(float64(bodyLen) * endratio * scale)
-			newBlk := block{
-				Header: strings.TrimSpace(string(header[dataStart:dataEnd])),
-				Body:   strings.TrimSpace(string(blk.Body[start:end])),
-				Type:   blk.Type,
-			}
-			chunks = append(chunks, newBlk)
-			// lastEnd = dataEnd
+	lh := min(len(blk.Header), (maxRunesCurrentLine)-((maxRunesCurrentLine)%3))
+	lb := min(len([]rune(blk.Body)), int(math.RoundToEven(float64(maxRunesCurrentLine-2))))
+	/// nibble just enough to fill the line
+	chunks = append(chunks, block{
+		Type:   blk.Type,
+		Header: blk.Header[:lh],
+		Body:   string([]rune(blk.Body)[:lb]),
+	})
+	blkWidth -= max(lh, lb)
+	prevChunkEndIdx := max(lh, lb)
+	/// take big line bites
+	for blkWidth > lineLengthMax {
+		chunks = append(chunks, block{
+			Type:   blk.Type,
+			Header: blk.Header[prevChunkEndIdx : prevChunkEndIdx+lineLengthMax],
+			Body:   string([]rune(blk.Body)[prevChunkEndIdx : prevChunkEndIdx+lineLengthMax]),
+		})
+		blkWidth -= lineLengthMax
+		prevChunkEndIdx += lineLengthMax
+	}
+	currLen = 0
+	/// grab the remaining block
+	if blkWidth > 0 {
+		b := block{
+			Type:   blk.Type,
+			Header: blk.Header[prevChunkEndIdx:],
+			Body:   string([]rune(blk.Body)[prevChunkEndIdx:]),
 		}
+		chunks = append(chunks, b)
+		currLen = max(len(b.Body), len(b.Header))
 	}
 
 	(*ret)[currLine] = append((*ret)[currLine], chunks[0])
@@ -577,7 +560,7 @@ func chunkBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currL
 	return currLine, x
 }
 
-// / same as chunkBlock but optimized for strings
+// chunks a long string block across multiple lines
 func chunkStringBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currLine int, x int) (int, int) {
 	chunks := make([]block, 0, 4)
 	data := blk.Body
@@ -588,11 +571,12 @@ func chunkStringBlock(blk block, lineLengthMax int, currLen int, ret *[][]block,
 		(*ret) = append((*ret), make([]block, 0, 3))
 		currLen -= lineLengthMax
 	}
+	/// lots of /3 under the assumption 1 rune = 1 byte (works in most cases)
 	maxRunesCurrentLine := (lineLengthMax - currLen) / 3
 	// Second term has lengthLineMax/3 added; for data of length 27 and line length 15, I'll want to create one slice at [0,15] and a second at [15,27] (clamping 30 to 27), so the loop needs to go "one past"
-	for i := maxRunesCurrentLine; i < dataLen+lineLengthMax/3; i += lineLengthMax / 3 {
+	for i := maxRunesCurrentLine; i < dataLen+lineLengthMax/3; i += (lineLengthMax / 3) - 1 {
 		dataStart := max(i-lineLengthMax/3, 0) // Previous iteration, or start of string
-		dataEnd := max(min(i, dataLen), 0)     // Current iteration, or end of string
+		dataEnd := max(min(i-1, dataLen), 0)   // Current iteration, or end of string
 		if dataStart != dataEnd {
 			/// take a bite out of the header too
 			/// for string this is nice cause its always a 3:1 ratio, so we'll always
@@ -712,33 +696,6 @@ func replaceNonPrintable(input string) string {
 
 	return result.String()
 }
-func colorText(datatype int, text string) string {
-	color := "whitebright"
-	switch datatype {
-	case DATATYPE_TIME:
-		fallthrough
-	case DATATYPE_NUMBER:
-		{
-			color = "blue"
-		}
-	case DATATYPE_HEX:
-		fallthrough
-	case DATATYPE_STRING:
-		{
-			color = "green"
-		}
-	case DATATYPE_MISC:
-		{
-			color = "magenta"
-		}
-	case DATATYPE_OPCODE:
-		{
-			color = "yellow"
-		}
-	case DATATYPE_ERR:
-		{
-			color = "red"
-		}
-	}
-	return oigiki.ProcessTags(fmt.Sprintf("{%s}%s{/}", color, text))
+func colorText(t datatype, text string) string {
+	return oigiki.ProcessTags(fmt.Sprintf("{%s}%s{/}", t.Color(), text))
 }
