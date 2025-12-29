@@ -2,6 +2,11 @@ package main
 
 type datatype int8
 
+type block struct {
+	Header, Body string
+	Type         datatype
+}
+
 const (
 	DATATYPE_ERR datatype = iota - 1
 	DATATYPE_MISC
