@@ -454,7 +454,7 @@ func chunkData(blocks []block) [][]block {
 		}
 		/// FIXME: main issue? this becomes desynced from the actual width
 		estimatedLen := currLineLen + blkWidth
-		println(fmt.Sprintf("idx: %d:%d; est len after printing: %d; body: %q; type: %s", currLine, currLineLen, estimatedLen, replaceNonPrintable(blk.Body), blk.Type))
+		//println(fmt.Sprintf("idx: %d:%d; est len after printing: %d; body: %q; type: %s", currLine, currLineLen, estimatedLen, replaceNonPrintable(blk.Body), blk.Type))
 
 		if estimatedLen >= lineLengthMax {
 			/// shared chunking
