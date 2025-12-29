@@ -539,6 +539,8 @@ func chunkHexBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, cu
 }
 
 // chunks a long string block across multiple lines
+// FIXME: make greedier (it likes to hang under 80 when theres room to perfectly fit in)
+// see: coinbasetx 010000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff260298001a2f706f676f6c6f202d20666f73732069732066726565646f6d2f0dd001bc00000000ffffffff023dc4039500000000160014629cf95ea52e949c3c0ed47a0fbb41a6bc0b194d0000000000000000266a24aa21a9eddaa2ef8f94277097f2e6f4c51f63cff7aac266edfbda60842baeb5b25acde7bb0120000000000000000000000000000000000000000000000000000000000000000000000000
 func chunkStringBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currLine int, x int) (int, int) {
 	chunks := make([]block, 0, 4)
 	data := blk.Body
