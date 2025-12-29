@@ -2,8 +2,6 @@ module xxbitcoin
 
 go 1.25.1
 
-//replace github.com/Delta456/box-cli-maker/v2 => ../../GitHub/box-cli-maker
-
 require (
 	github.com/0xf0xx0/oigiki v1.2.0
 	github.com/Delta456/box-cli-maker/v2 v2.3.0
