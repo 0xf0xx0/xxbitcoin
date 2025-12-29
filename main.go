@@ -499,8 +499,8 @@ func chunkHexBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, cu
 
 	maxRunesCurrentLine := lineLengthMax - currLen
 
-	// %3 cause 00<spc> in header == "0" in body
-	lh := min(len(blk.Header), (maxRunesCurrentLine)-((maxRunesCurrentLine)%3))
+	// account for space in header
+	lh := min(len(blk.Header), int(math.RoundToEven(float64(maxRunesCurrentLine))))
 	// round to even keeps the body from leaking over by one (with the -2 to compensate for borders)
 	lb := min(len([]rune(blk.Body)), int(math.RoundToEven(float64(maxRunesCurrentLine-2))))
 	/// nibble just enough to fill the line
@@ -510,25 +510,25 @@ func chunkHexBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, cu
 		Body:   string([]rune(blk.Body)[:lb]),
 	})
 	blkWidth -= max(lh, lb)
-	prevChunkEndIdx := max(lh, lb)
+	prevChunkBodyEndIdx :=lb
+	prevChunkHeaderEndIdx :=lh
 	/// take big line bites
 	for blkWidth > lineLengthMax {
 		chunks = append(chunks, block{
 			Type:   blk.Type,
-			Header: blk.Header[prevChunkEndIdx : prevChunkEndIdx+lineLengthMax],
-			Body:   string([]rune(blk.Body)[prevChunkEndIdx : prevChunkEndIdx+lineLengthMax]),
+			Header: blk.Header[prevChunkBodyEndIdx : prevChunkBodyEndIdx+lineLengthMax],
+			Body:   string([]rune(blk.Body)[prevChunkBodyEndIdx : prevChunkBodyEndIdx+lineLengthMax]),
 		})
 		blkWidth -= lineLengthMax
-		prevChunkEndIdx += lineLengthMax
+		prevChunkBodyEndIdx += lineLengthMax
 	}
 	currLen = 0
 	/// grab the remaining block
 	if blkWidth > 0 {
-		prevChunkEndIdx = blkWidth
 		b := block{
 			Type:   blk.Type,
-			Header: blk.Header[prevChunkEndIdx:],
-			Body:   string([]rune(blk.Body)[prevChunkEndIdx:]),
+			Header: blk.Header[prevChunkHeaderEndIdx:],
+			Body:   string([]rune(blk.Body)[prevChunkBodyEndIdx:]),
 		}
 		chunks = append(chunks, b)
 		currLen = max(len(b.Body), len(b.Header))
