@@ -21,7 +21,6 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
-	"github.com/gookit/color"
 	"github.com/urfave/cli/v3"
 )
 
@@ -103,7 +102,7 @@ func main() {
 
 	// script, _ := hex.DecodeString("0237011e2f706f676f6c6f202d20646563656e7472616c697a65206f72206469652f08fe53956400000000")
 	/// edge case: error overflow >:C
-	// script, _ := hex.DecodeString("0297001a2f706f676f6c6f202d20666f73732069732066726565646f6d2f9359121200000000")
+	// script, _ := hex.DecodeString("03b1300e048c0d52692f466f756e6472792055534120506f6f6c202364726f70676f6c642ffabe6d6da6604f6ae857cce919cdbc846baf047fedb7f863b8632fa69e3289c3a4ddf6a1010000000000000040a0e579b002000000000000")
 	/// edge case: barely error overflow >:CC
 	// header, _ := hex.DecodeString("00005823301b30a68438ea562def4083f1b6151883e4858eaa1a01000000000000000000c6fe1e8c906cae6ea804a2cffbc2afe8a750985ae991fcb49e71003e3a7e16d32029d06838fa01171c223ef2")
 
@@ -455,13 +454,11 @@ func chunkData(blocks []block) [][]block {
 		}
 		/// FIXME: main issue? this becomes desynced from the actual width
 		estimatedLen := currLineLen + blkWidth
-		println(fmt.Sprintf("idx: %d:%d; est len: %d; body: %q; type: %s", currLine, currLineLen, estimatedLen, replaceNonPrintable(blk.Body), blk.Type))
+		println(fmt.Sprintf("idx: %d:%d; est len after printing: %d; body: %q; type: %s", currLine, currLineLen, estimatedLen, replaceNonPrintable(blk.Body), blk.Type))
 
 		if estimatedLen >= lineLengthMax {
 			/// shared chunking
 			switch blk.Type {
-			case DATATYPE_TIME:
-				fallthrough
 			case DATATYPE_STRING:
 				{
 					/// break it
@@ -470,8 +467,10 @@ func chunkData(blocks []block) [][]block {
 			case DATATYPE_ERR:
 				/// try with script 30450221009d4cdcb330786e787164a025abca8a0655f3803da66ef18d14745819b7e28b6b02200d98881bdd055ff2da39e61a858936866610c7e878ea62f08c5ee1534532c14a01
 				currLine, blkWidth = chunkErrorBlock(blk, lineLengthMax, currLineLen, &ret, currLine, blkWidth)
-			case DATATYPE_MISC:
+			case DATATYPE_TIME:
 				fallthrough
+			// case DATATYPE_MISC:
+			// fallthrough
 			case DATATYPE_HEX:
 				currLine, blkWidth = chunkHexBlock(blk, lineLengthMax, currLineLen, &ret, currLine, blkWidth)
 			default:
@@ -500,7 +499,7 @@ func chunkHexBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, cu
 	maxRunesCurrentLine := lineLengthMax - currLen
 
 	// account for space in header
-	lh := min(len(blk.Header), int(math.RoundToEven(float64(maxRunesCurrentLine))))
+	lh := min(len(blk.Header), int(math.RoundToEven(float64(maxRunesCurrentLine-((maxRunesCurrentLine)%3)))))
 	// round to even keeps the body from leaking over by one (with the -2 to compensate for borders)
 	lb := min(len([]rune(blk.Body)), int(math.RoundToEven(float64(maxRunesCurrentLine-2))))
 	/// nibble just enough to fill the line
@@ -510,8 +509,8 @@ func chunkHexBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, cu
 		Body:   string([]rune(blk.Body)[:lb]),
 	})
 	blkWidth -= max(lh, lb)
-	prevChunkBodyEndIdx :=lb
-	prevChunkHeaderEndIdx :=lh
+	prevChunkBodyEndIdx := lb
+	prevChunkHeaderEndIdx := lh
 	/// take big line bites
 	for blkWidth > lineLengthMax {
 		chunks = append(chunks, block{
@@ -586,7 +585,7 @@ func chunkErrorBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, 
 	chunks := make([]block, 0, 4)
 	blkWidth := max(len(blk.Body), len(blk.Header))
 
-	maxRunesCurrentLine := lineLengthMax - currLen
+	maxRunesCurrentLine := int(math.RoundToEven(float64(lineLengthMax - currLen - 1)))
 
 	lh := min(len(blk.Header), maxRunesCurrentLine)
 	lb := min(len([]rune(blk.Body)), int(math.RoundToEven(float64(maxRunesCurrentLine-2))))
@@ -601,14 +600,16 @@ func chunkErrorBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, 
 	prevHeaderChunkEndIdx := lh
 	/// take big line bites
 	for blkWidth > lineLengthMax {
+		headerEndIdx := min(prevHeaderChunkEndIdx+lineLengthMax, len(blk.Header)) - 2
+		bodyEndIdx := min(prevBodyChunkEndIdx+lineLengthMax, len([]rune(blk.Body)))
 		chunks = append(chunks, block{
 			Type:   blk.Type,
-			Header: blk.Header[prevHeaderChunkEndIdx : prevHeaderChunkEndIdx+lineLengthMax],
-			Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx : prevBodyChunkEndIdx+lineLengthMax]),
+			Header: blk.Header[prevHeaderChunkEndIdx : headerEndIdx],
+			Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx : bodyEndIdx]),
 		})
 		blkWidth -= lineLengthMax
-		prevHeaderChunkEndIdx += lineLengthMax
-		prevBodyChunkEndIdx += lineLengthMax
+		prevHeaderChunkEndIdx = headerEndIdx
+		prevBodyChunkEndIdx = bodyEndIdx
 	}
 	currLen = 0
 	/// grab the remaining block
@@ -627,29 +628,32 @@ func chunkErrorBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, 
 	return currLine, x
 }
 
-func appendChunksToLine(ret *[][]block, currLine int, chunks []block, x int, currLen int, lineLengthMax int) (int, int) {
+func appendChunksToLine(ret *[][]block, currLine int, chunks []block, lineLength int, currLen int, lineLengthMax int) (int, int) {
 	(*ret)[currLine] = append((*ret)[currLine], chunks[0])
-	x++
+	lineLength++ /// opening border
 	if len(chunks) > 1 {
 		for _, b := range chunks[1:] {
 			m := max(len(b.Header), len(b.Body))
 			/// +1 for border
-			x += m + 1
+			lineLength += m + 1
 			/// TODO: is this it? just currLen+x?
-			if currLen+x >= lineLengthMax {
+			if currLen+lineLength >= lineLengthMax {
 				currLine++
 				(*ret) = append((*ret), make([]block, 0, 3))
 				/// fresh line, both borders are included
-				x = m + 2
+				lineLength = m + 2
 			}
 			(*ret)[currLine] = append((*ret)[currLine], b)
 		}
+	} else {
+		currLine++
+		(*ret) = append((*ret), make([]block, 0, 3))
 	}
-	return currLine, x
+	return currLine, lineLength
 }
 
 func padString(str string, l int) string {
-	x := len(color.ClearCode(str))
+	x := len(oigiki.StripTags(str))
 	y := len(str)
 	ansiLen := y - x
 	if x < l {
@@ -673,11 +677,11 @@ func mergeBoxes(boxes []block) string {
 	for i, blk := range boxes {
 		/// ansi MUST be cleared here for proper len
 		str := replaceNonPrintable(blk.Body)
-		str = padString(colorText(blk.Type, str), len(color.ClearCode(boxes[i].Header)))
-		x := str
-		str = b.String("", str)
+		str = padString(colorText(blk.Type, str), len(oigiki.StripTags(boxes[i].Header)))
+		/// body needs to be processed here cause box compensates for ansi
+		boxStr := b.String("", oigiki.ProcessTags(str))
 		// str = b.String("", colorText(blk.Type, str))
-		split := strings.Split(str, "\n")
+		split := strings.Split(boxStr, "\n")
 		/// box height is always 3
 		if i == 0 && len(boxes) == 1 {
 			ret[1] = split[0]
@@ -706,14 +710,15 @@ func mergeBoxes(boxes []block) string {
 			ret[3] += temp
 		}
 		if boxes[i].Header == "" {
-			ret[0] += strings.Repeat(" ", len(color.ClearCode(x)))
+			ret[0] += strings.Repeat(" ", len(oigiki.StripTags(str))+1)
 		} else {
 			/// ansi MUST be cleared here for proper len
-			ret[0] += padString(colorText(blk.Type, blk.Header), len(color.ClearCode(x))+1)
+			ret[0] += padString(colorText(blk.Type, blk.Header), len(oigiki.StripTags(str))+1)
 		}
 	}
 	ret[0] = strings.TrimRight(ret[0], " ")
-	return strings.Join(ret, "\n")
+	/// process the rest of the colors
+	return oigiki.ProcessTags(strings.Join(ret, "\n"))
 }
 
 func replaceNonPrintable(input string) string {
@@ -731,5 +736,5 @@ func replaceNonPrintable(input string) string {
 	return result.String()
 }
 func colorText(t datatype, text string) string {
-	return oigiki.ProcessTags(fmt.Sprintf("{%s}%s{/}", t.Color(), text))
+	return fmt.Sprintf("{%s}%s{/}", t.Color(), text)
 }

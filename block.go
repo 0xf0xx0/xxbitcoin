@@ -43,10 +43,10 @@ func (d datatype) String() string {
 
 func (d datatype) Color() string {
 	switch d {
-	case DATATYPE_TIME:
-		fallthrough
 	case DATATYPE_NUMBER:
 		return "blue"
+	case DATATYPE_TIME:
+	return "cyan"
 	case DATATYPE_HEX:
 		fallthrough
 	case DATATYPE_STRING:
