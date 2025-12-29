@@ -10,7 +10,6 @@ require (
 	github.com/btcsuite/btcd v0.24.3-0.20250820175347-e8097a1b044c
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
-	github.com/gookit/color v1.5.4
 	github.com/urfave/cli/v3 v3.4.1
 )
 
@@ -20,6 +19,7 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.0.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
+	github.com/gookit/color v1.5.4 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
