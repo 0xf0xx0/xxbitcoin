@@ -440,22 +440,24 @@ func chunkData(blocks []block) [][]block {
 	lineLengthMax := 80
 	/// TODO: refactor and cleanup
 	for _, blk := range blocks {
-		/// NOTE: unsure if this is buggy
-		/// calc width of blk without borders
-		blkWidth := max(len(blk.Header), len(blk.Body)) // + 2
-		/// edge case fix: start on newline if the current line is already too long
 		if currLineLen >= lineLengthMax {
 			currLine++
 			ret = append(ret, make([]block, 0, 3))
 			currLineLen -= lineLengthMax
 		}
+
 		/// NOTE: unsure if this is buggy
-		/// estimate placed length including borders
-		estimatedLen := currLineLen + blkWidth + 2
+		/// calc width of blk without borders
+		blkWidth := max(len(blk.Header), len(blk.Body)) + 2
+		/// edge case fix: start on newline if the current line is already too long
 		/// blocks strung after the furst only have one new border
 		if len(ret[currLine]) > 1 {
-			estimatedLen -= 1
+			blkWidth -= 1
 		}
+
+		/// NOTE: unsure if this is buggy
+		/// estimate placed length including borders
+		estimatedLen := currLineLen + blkWidth
 		//println(fmt.Sprintf("idx: %d:%d; est len after printing: %d; body: %q; type: %s", currLine, currLineLen, estimatedLen, replaceNonPrintable(blk.Body), blk.Type))
 
 		if estimatedLen >= lineLengthMax {
@@ -545,39 +547,47 @@ func chunkHexBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, cu
 // see: coinbasetx 010000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff260298001a2f706f676f6c6f202d20666f73732069732066726565646f6d2f0dd001bc00000000ffffffff023dc4039500000000160014629cf95ea52e949c3c0ed47a0fbb41a6bc0b194d0000000000000000266a24aa21a9eddaa2ef8f94277097f2e6f4c51f63cff7aac266edfbda60842baeb5b25acde7bb0120000000000000000000000000000000000000000000000000000000000000000000000000
 func chunkStringBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currLine int, x int) (int, int) {
 	chunks := make([]block, 0, 4)
-	data := blk.Body
-	dataLen := len(data)
-	/// edge case fix: start on newline
-	if currLen >= lineLengthMax {
-		currLine++
-		(*ret) = append((*ret), make([]block, 0, 3))
-		currLen -= lineLengthMax
-	}
-	/// lots of /3 under the assumption 1 rune = 1 byte (works in most cases)
-	maxRunesCurrentLine := (lineLengthMax - currLen) / 3
-	// Second term has lengthLineMax/3 added; for data of length 27 and line length 15, I'll want to create one slice at [0,15] and a second at [15,27] (clamping 30 to 27), so the loop needs to go "one past"
-	for i := maxRunesCurrentLine; i < dataLen+lineLengthMax/3; i += (lineLengthMax / 3) - 1 {
-		dataStart := max(i-lineLengthMax/3, 0) // Previous iteration, or start of string
-		dataEnd := max(min(i-1, dataLen), 0)   // Current iteration, or end of string
-		if dataStart != dataEnd {
-			/// take a bite out of the header too
-			/// for string this is nice cause its always a 3:1 ratio, so we'll always
-			/// select whole bytes
-			startratio := float32(0)
-			endratio := float32(dataEnd) / float32(dataLen)
-			if dataStart > 0 {
-				startratio = float32(dataStart) / float32(dataLen)
-			}
-			start := int(float32(len(blk.Header)) * startratio)
-			end := int(float32(len(blk.Header)) * endratio)
+	blkWidth := max(len(blk.Body), len(blk.Header))
 
-			chunk := block{
-				Header: strings.TrimSpace(string(blk.Header[start:end])),
-				Body:   data[dataStart:dataEnd],
-				Type:   blk.Type,
-			}
-			chunks = append(chunks, chunk)
+	/// FIXME: some strings need -1 and others -2, find out why
+	/// FIXME: this is desyncing the line
+	maxRunesCurrentLine := int(math.RoundToEven(float64(lineLengthMax - currLen - 1)))
+
+	lh := min(len(blk.Header), maxRunesCurrentLine)
+	lb := min(len([]rune(blk.Body)), int(float64(maxRunesCurrentLine/3)))
+	println(len(blk.Header), lh, maxRunesCurrentLine)
+	/// nibble just enough to fill the line
+	chunks = append(chunks, block{
+		Type:   blk.Type,
+		Header: blk.Header[:lh],
+		Body:   string([]rune(blk.Body)[:lb]),
+	})
+	blkWidth -= lh
+	prevBodyChunkEndIdx := lb
+	prevHeaderChunkEndIdx := lh
+	/// take big line bites
+	for blkWidth > lineLengthMax {
+		headerEndIdx := min(prevHeaderChunkEndIdx+lineLengthMax, len(blk.Header)) - 2
+		bodyEndIdx := min(prevBodyChunkEndIdx+lineLengthMax, len([]rune(blk.Body)))
+		chunks = append(chunks, block{
+			Type:   blk.Type,
+			Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx],
+			Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:bodyEndIdx]),
+		})
+		blkWidth -= lineLengthMax
+		prevHeaderChunkEndIdx = headerEndIdx
+		prevBodyChunkEndIdx = bodyEndIdx
+	}
+	currLen = 0
+	/// grab the remaining block
+	if blkWidth > 0 {
+		b := block{
+			Type:   blk.Type,
+			Header: blk.Header[prevHeaderChunkEndIdx:],
+			Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:]),
 		}
+		chunks = append(chunks, b)
+		currLen = max(len(b.Body), len(b.Header))
 	}
 
 	currLine, x = appendChunksToLine(ret, currLine, chunks, x, currLen, lineLengthMax)
@@ -590,7 +600,6 @@ func chunkErrorBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, 
 	blkWidth := max(len(blk.Body), len(blk.Header))
 
 	maxRunesCurrentLine := int(math.RoundToEven(float64(lineLengthMax - currLen - 3)))
-	println(maxRunesCurrentLine, currLen)
 
 	lh := min(len(blk.Header), maxRunesCurrentLine)
 	lb := min(len([]rune(blk.Body)), int(float64(maxRunesCurrentLine)))
@@ -685,7 +694,6 @@ func mergeBoxes(boxes []block) string {
 		str = padString(colorText(blk.Type, str), len(oigiki.StripTags(boxes[i].Header)))
 		/// body needs to be processed here cause box compensates for ansi
 		boxStr := b.String("", oigiki.ProcessTags(str))
-		// str = b.String("", colorText(blk.Type, str))
 		split := strings.Split(boxStr, "\n")
 		/// box height is always 3
 		if i == 0 && len(boxes) == 1 {
