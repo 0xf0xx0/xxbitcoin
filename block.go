@@ -7,6 +7,11 @@ type block struct {
 	Type         datatype
 }
 
+/// width without border
+func (b block) Width() int {
+	return max(len(b.Header), len([]rune(b.Body)))
+}
+
 const (
 	DATATYPE_ERR datatype = iota - 1
 	DATATYPE_MISC
