@@ -440,12 +440,9 @@ func chunkData(blocks []block) [][]block {
 	lineLengthMax := 80
 	/// TODO: refactor and cleanup
 	for _, blk := range blocks {
-		/// account for border width
-		blkWidth := max(len(blk.Header), len(blk.Body)) + 2
-		/// blocks strung after the furst only have one new border
-		if len(ret[currLine]) > 1 {
-			blkWidth -= 1
-		}
+		/// NOTE: unsure if this is buggy
+		/// calc width of blk without borders
+		blkWidth := max(len(blk.Header), len(blk.Body)) // + 2
 		/// edge case fix: start on newline if the current line is already too long
 		if currLineLen >= lineLengthMax {
 			currLine++
@@ -453,7 +450,12 @@ func chunkData(blocks []block) [][]block {
 			currLineLen -= lineLengthMax
 		}
 		/// NOTE: unsure if this is buggy
-		estimatedLen := currLineLen + blkWidth
+		/// estimate placed length including borders
+		estimatedLen := currLineLen + blkWidth + 2
+		/// blocks strung after the furst only have one new border
+		if len(ret[currLine]) > 1 {
+			estimatedLen -= 1
+		}
 		//println(fmt.Sprintf("idx: %d:%d; est len after printing: %d; body: %q; type: %s", currLine, currLineLen, estimatedLen, replaceNonPrintable(blk.Body), blk.Type))
 
 		if estimatedLen >= lineLengthMax {
@@ -587,10 +589,11 @@ func chunkErrorBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, 
 	chunks := make([]block, 0, 4)
 	blkWidth := max(len(blk.Body), len(blk.Header))
 
-	maxRunesCurrentLine := int(math.RoundToEven(float64(lineLengthMax - currLen - 1)))
+	maxRunesCurrentLine := int(math.RoundToEven(float64(lineLengthMax - currLen - 3)))
+	println(maxRunesCurrentLine, currLen)
 
 	lh := min(len(blk.Header), maxRunesCurrentLine)
-	lb := min(len([]rune(blk.Body)), int(math.RoundToEven(float64(maxRunesCurrentLine-2))))
+	lb := min(len([]rune(blk.Body)), int(float64(maxRunesCurrentLine)))
 	/// nibble just enough to fill the line
 	chunks = append(chunks, block{
 		Type:   blk.Type,
