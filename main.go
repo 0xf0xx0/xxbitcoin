@@ -452,7 +452,7 @@ func chunkData(blocks []block) [][]block {
 			ret = append(ret, make([]block, 0, 3))
 			currLineLen -= lineLengthMax
 		}
-		/// FIXME: main issue? this becomes desynced from the actual width
+		/// NOTE: unsure if this is buggy
 		estimatedLen := currLineLen + blkWidth
 		//println(fmt.Sprintf("idx: %d:%d; est len after printing: %d; body: %q; type: %s", currLine, currLineLen, estimatedLen, replaceNonPrintable(blk.Body), blk.Type))
 
@@ -606,8 +606,8 @@ func chunkErrorBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, 
 		bodyEndIdx := min(prevBodyChunkEndIdx+lineLengthMax, len([]rune(blk.Body)))
 		chunks = append(chunks, block{
 			Type:   blk.Type,
-			Header: blk.Header[prevHeaderChunkEndIdx : headerEndIdx],
-			Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx : bodyEndIdx]),
+			Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx],
+			Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:bodyEndIdx]),
 		})
 		blkWidth -= lineLengthMax
 		prevHeaderChunkEndIdx = headerEndIdx
