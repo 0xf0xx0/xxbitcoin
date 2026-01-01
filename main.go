@@ -91,19 +91,17 @@ func main() {
 	}
 
 	/// foundry usa 915753
+	/// FIXME: string chunk overflow
 	// script, _ := hex.DecodeString("0329f90d041b21d0682f466f756e6472792055534120506f6f6c202364726f70676f6c642ffabe6d6d5c91db6d6adc594b6223bf953075281941f2450c5ba328544b7e04dcdc177d9901000000000000007c0134999e620d0000000000")
+	// script, _ := hex.DecodeString("0237011e2f706f676f6c6f202d20646563656e7472616c697a65206f72206469652f08fe53956400000000")
 	/// slushpool 915754
-	/// edge case: string chunk overflow
 	// script, _ := hex.DecodeString("032af90d102f736c7573682f6500b006a066120e01fabe6d6d560a0f5f0cf3bd4dbfc58629a834166b021716b115cc267ba92822755946c705100000000000000000007b434d00000000000000")
 
 	/// edge case: op overflow
 	// script, _ := hex.DecodeString("47304402204113c4e58ccdedb5b633483720f8e9837b89c58847d6e4d033c576a5e2a295f702200b867d08291f884e491772b61fd03127a1e0efbdef87442c97f334d1aa4aef9901410426cbe208d7e5bf3b5b38ab0b05d0ddd8ef8ea06fe946d622ce5db29a27d3d020b3ffa629dda1201323b1dada376867201df1de49455e898ecc315511a84507da")
 
-	// script, _ := hex.DecodeString("0237011e2f706f676f6c6f202d20646563656e7472616c697a65206f72206469652f08fe53956400000000")
 	/// edge case: error overflow >:C
 	// script, _ := hex.DecodeString("03b1300e048c0d52692f466f756e6472792055534120506f6f6c202364726f70676f6c642ffabe6d6da6604f6ae857cce919cdbc846baf047fedb7f863b8632fa69e3289c3a4ddf6a1010000000000000040a0e579b002000000000000")
-	/// edge case: barely error overflow >:CC
-	// header, _ := hex.DecodeString("00005823301b30a68438ea562def4083f1b6151883e4858eaa1a01000000000000000000c6fe1e8c906cae6ea804a2cffbc2afe8a750985ae991fcb49e71003e3a7e16d32029d06838fa01171c223ef2")
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		log.Fatal(err)
@@ -474,7 +472,7 @@ func chunkData(blocks []block) [][]block {
 				/// take big line bites
 				for c >= maxLineLen {
 					headerEndIdx := min(prevHeaderChunkEndIdx+maxLineLen, len(blk.Header))
-					bodyEndIdx := min(prevBodyChunkEndIdx+maxLineLen, len([]rune(blk.Body)))
+					bodyEndIdx := min(prevBodyChunkEndIdx+(maxLineLen/3), len([]rune(blk.Body)))
 					chunks = append(chunks, block{
 						Type:   blk.Type,
 						Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx],
