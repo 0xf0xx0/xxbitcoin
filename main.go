@@ -55,7 +55,7 @@ func main() {
 				}
 				rawInput = string(b)
 			}
-			input, err := hex.DecodeString(strings.TrimSpace(rawInput))
+			input, err := hex.DecodeString(rawInput)
 			if err != nil {
 				return err
 			}
@@ -86,7 +86,7 @@ func main() {
 				}
 			}
 			for _, line := range chunkData(blks) {
-				fmt.Printf("%s\n", mergeBoxes(line))
+				fmt.Println(mergeBoxes(line))
 			}
 			return nil
 		},
@@ -466,7 +466,11 @@ func chunkData(blocks []block) [][]block {
 					currLineIdx++
 					ret = append(ret, make([]block, 0, 3))
 				} else {
-					chunks = append(chunks, block{Type: blk.Type, Header: strings.TrimSpace(blk.Header[:lh]), Body: string([]rune(blk.Body)[:lb])})
+					chunks = append(chunks, block{
+						Type:   blk.Type,
+						Header: strings.TrimSpace(blk.Header[:lh]),
+						Body: string([]rune(blk.Body)[:lb]),
+					})
 				}
 				prevBodyChunkEndIdx := lb
 				prevHeaderChunkEndIdx := lh
@@ -477,7 +481,7 @@ func chunkData(blocks []block) [][]block {
 					bodyEndIdx := min(prevBodyChunkEndIdx+(maxLineLen/3), len([]rune(blk.Body)))
 					chunks = append(chunks, block{
 						Type:   blk.Type,
-						Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx],
+						Header: strings.TrimSpace(blk.Header[prevHeaderChunkEndIdx:headerEndIdx]),
 						Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:bodyEndIdx]),
 					})
 					c -= maxLineLen
@@ -499,11 +503,16 @@ func chunkData(blocks []block) [][]block {
 				lh := min(len(blk.Header), maxRunesCurrentLine-(maxRunesCurrentLine%3))
 				lb := min(len([]rune(blk.Body)), maxRunesCurrentLine-(maxRunesCurrentLine%3))
 				/// nibble just enough to fill the line
-				chunks = append(chunks, block{
-					Type:   blk.Type,
-					Header: blk.Header[:lh],
-					Body:   string([]rune(blk.Body)[:lb]),
-				})
+				if lb == 0 || lh == 0 {
+					currLineIdx++
+					ret = append(ret, make([]block, 0, 3))
+				} else {
+					chunks = append(chunks, block{
+						Type:   blk.Type,
+						Header: strings.TrimSpace(blk.Header[:lh]),
+						Body:   string([]rune(blk.Body)[:lb]),
+					})
+				}
 				prevBodyChunkEndIdx := lb
 				prevHeaderChunkEndIdx := lh
 				c := blkWidth
@@ -513,7 +522,7 @@ func chunkData(blocks []block) [][]block {
 					bodyEndIdx := min(prevBodyChunkEndIdx+maxLineLen, len([]rune(blk.Body)))
 					chunks = append(chunks, block{
 						Type:   blk.Type,
-						Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx],
+						Header: strings.TrimSpace(blk.Header[prevHeaderChunkEndIdx:headerEndIdx]),
 						Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:bodyEndIdx]),
 					})
 					c -= maxLineLen
@@ -550,7 +559,7 @@ func chunkData(blocks []block) [][]block {
 					bodyEndIdx := min(prevBodyChunkEndIdx+maxLineLen, len([]rune(blk.Body)))
 					chunks = append(chunks, block{
 						Type:   blk.Type,
-						Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx],
+						Header: strings.TrimSpace(blk.Header[prevHeaderChunkEndIdx:headerEndIdx]),
 						Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:bodyEndIdx]),
 					})
 					c -= maxLineLen
