@@ -469,7 +469,13 @@ func chunkData(blocks []block) [][]block {
 				lh := min(len(blk.Header), maxRunesCurrentLine-(maxRunesCurrentLine%3))
 				lb := min(len([]rune(blk.Body)), lh/3)
 
-				chunks = append(chunks, block{Type: blk.Type, Header: strings.TrimSpace(blk.Header[:lh]), Body: string([]rune(blk.Body)[:lb])})
+				/// edge case: avoid empty block
+				if lb == 0 || lh == 0 {
+					currLineIdx++
+					ret = append(ret, make([]block, 0, 3))
+				} else {
+					chunks = append(chunks, block{Type: blk.Type, Header: strings.TrimSpace(blk.Header[:lh]), Body: string([]rune(blk.Body)[:lb])})
+				}
 				prevBodyChunkEndIdx := lb
 				prevHeaderChunkEndIdx := lh
 				for blkWidth >= maxLineLen {
@@ -487,8 +493,8 @@ func chunkData(blocks []block) [][]block {
 				currLineIdx, estimatedLen = appendChunksToLine(&ret, currLineIdx, chunks, blkWidth, currLineLen, maxLineLen)
 			case DATATYPE_ERR:
 				/// try with script 30450221009d4cdcb330786e787164a025abca8a0655f3803da66ef18d14745819b7e28b6b02200d98881bdd055ff2da39e61a858936866610c7e878ea62f08c5ee1534532c14a01
-				lh := min(len(blk.Header), maxRunesCurrentLine - (maxRunesCurrentLine % 3))
-				lb := min(len([]rune(blk.Body)), maxRunesCurrentLine - (maxRunesCurrentLine % 3))
+				lh := min(len(blk.Header), maxRunesCurrentLine-(maxRunesCurrentLine%3))
+				lb := min(len([]rune(blk.Body)), maxRunesCurrentLine-(maxRunesCurrentLine%3))
 				/// nibble just enough to fill the line
 				chunks = append(chunks, block{
 					Type:   blk.Type,
@@ -510,8 +516,8 @@ func chunkData(blocks []block) [][]block {
 					prevHeaderChunkEndIdx = headerEndIdx
 					prevBodyChunkEndIdx = bodyEndIdx
 				}
-				/// grab the remaining block
-				if blkWidth > 0 {
+				/// grab the remaining block, avoiding zero-width blocks
+				if blkWidth > 0 && (len([]rune(blk.Body)[prevBodyChunkEndIdx:]) != 0) {
 					b := block{
 						Type:   blk.Type,
 						Header: blk.Header[prevHeaderChunkEndIdx:],
@@ -587,7 +593,6 @@ func chunkData(blocks []block) [][]block {
 
 func appendChunksToLine(ret *[][]block, currLine int, chunks []block, lineLength int, currLen int, lineLengthMax int) (int, int) {
 	(*ret)[currLine] = append((*ret)[currLine], chunks[0])
-	println("xxx", lineLength)
 	lineLength++ /// opening border
 	if len(chunks) > 1 {
 		for _, b := range chunks[1:] {
@@ -603,9 +608,6 @@ func appendChunksToLine(ret *[][]block, currLine int, chunks []block, lineLength
 			}
 			(*ret)[currLine] = append((*ret)[currLine], b)
 		}
-	} else {
-		currLine++
-		(*ret) = append((*ret), make([]block, 0, 3))
 	}
 	return currLine, lineLength
 }
