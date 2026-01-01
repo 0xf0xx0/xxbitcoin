@@ -42,12 +42,14 @@ func main() {
 			blks := []block{}
 
 			/// TODO: handle binary
-			rawInput := ctx.Args().Get(0)
+			rawInput := strings.TrimSpace(ctx.Args().Get(0))
 			if len(rawInput) == 0 {
 				b, err := io.ReadAll(os.Stdin)
 				if err != nil {
 					panic(err)
 				}
+
+				b = bytes.TrimSpace(b)
 				if len(b) == 0 {
 					return fmt.Errorf("no input")
 				}
