@@ -478,16 +478,27 @@ func chunkData(blocks []block) [][]block {
 				}
 				prevBodyChunkEndIdx := lb
 				prevHeaderChunkEndIdx := lh
-				for blkWidth >= maxLineLen {
+				c := blkWidth
+				/// take big line bites
+				for c >= maxLineLen {
 					headerEndIdx := min(prevHeaderChunkEndIdx+maxLineLen, len(blk.Header))
 					bodyEndIdx := min(prevBodyChunkEndIdx+maxLineLen, len([]rune(blk.Body)))
-					chunks = append(chunks, block{Type: blk.Type, Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx], Body: string([]rune(blk.Body)[prevBodyChunkEndIdx:bodyEndIdx])})
-					blkWidth -= maxLineLen
+					chunks = append(chunks, block{
+						Type:   blk.Type,
+						Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx],
+						Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:bodyEndIdx]),
+					})
+					c -= maxLineLen
 					prevHeaderChunkEndIdx = headerEndIdx
 					prevBodyChunkEndIdx = bodyEndIdx
 				}
-				if blkWidth > 0 {
-					b := block{Type: blk.Type, Header: blk.Header[prevHeaderChunkEndIdx:], Body: string([]rune(blk.Body)[prevBodyChunkEndIdx:])}
+				/// grab the remaining block, avoiding zero-width blocks
+				if c > 0 && len(blk.Header[prevHeaderChunkEndIdx:]) != 0 {
+					b := block{
+						Type:   blk.Type,
+						Header: blk.Header[prevHeaderChunkEndIdx:],
+						Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:]),
+					}
 					chunks = append(chunks, b)
 				}
 				currLineIdx, estimatedLen = appendChunksToLine(&ret, currLineIdx, chunks, blkWidth, currLineLen, maxLineLen)
@@ -503,8 +514,9 @@ func chunkData(blocks []block) [][]block {
 				})
 				prevBodyChunkEndIdx := lb
 				prevHeaderChunkEndIdx := lh
+				c := blkWidth
 				/// take big line bites
-				for blkWidth >= maxLineLen {
+				for c >= maxLineLen {
 					headerEndIdx := min(prevHeaderChunkEndIdx+maxLineLen, len(blk.Header))
 					bodyEndIdx := min(prevBodyChunkEndIdx+maxLineLen, len([]rune(blk.Body)))
 					chunks = append(chunks, block{
@@ -512,12 +524,12 @@ func chunkData(blocks []block) [][]block {
 						Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx],
 						Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:bodyEndIdx]),
 					})
-					blkWidth -= maxLineLen
+					c -= maxLineLen
 					prevHeaderChunkEndIdx = headerEndIdx
 					prevBodyChunkEndIdx = bodyEndIdx
 				}
 				/// grab the remaining block, avoiding zero-width blocks
-				if blkWidth > 0 && (len([]rune(blk.Body)[prevBodyChunkEndIdx:]) != 0) {
+				if c > 0 && len([]rune(blk.Body)[prevBodyChunkEndIdx:]) != 0 {
 					b := block{
 						Type:   blk.Type,
 						Header: blk.Header[prevHeaderChunkEndIdx:],
@@ -525,14 +537,8 @@ func chunkData(blocks []block) [][]block {
 					}
 					chunks = append(chunks, b)
 				}
-				println(currLineIdx, estimatedLen)
-				currLineIdx, estimatedLen = appendChunksToLine(&ret, currLineIdx, chunks, blkWidth, currLineLen, maxLineLen)
-				println(currLineIdx, estimatedLen)
 
-			case DATATYPE_TIME:
-				fallthrough
-			// case DATATYPE_MISC:
-			// fallthrough
+				currLineIdx, estimatedLen = appendChunksToLine(&ret, currLineIdx, chunks, blkWidth, currLineLen, maxLineLen)
 			case DATATYPE_HEX:
 				// account for space in header
 				lh := min(len(blk.Header), maxRunesCurrentLine-(maxRunesCurrentLine%3))
@@ -543,25 +549,28 @@ func chunkData(blocks []block) [][]block {
 					Header: strings.TrimSpace(blk.Header[:lh]),
 					Body:   string([]rune(blk.Body)[:lb]),
 				})
-				blkWidth -= lh
-				prevChunkBodyEndIdx := lb
-				prevChunkHeaderEndIdx := lh
+				prevBodyChunkEndIdx := lb
+				prevHeaderChunkEndIdx := lh
+				c := blkWidth
 				/// take big line bites
-				for blkWidth > maxLineLen {
+				for c >= maxLineLen {
+					headerEndIdx := min(prevHeaderChunkEndIdx+maxLineLen, len(blk.Header))
+					bodyEndIdx := min(prevBodyChunkEndIdx+maxLineLen, len([]rune(blk.Body)))
 					chunks = append(chunks, block{
 						Type:   blk.Type,
-						Header: blk.Header[prevChunkBodyEndIdx : prevChunkBodyEndIdx+maxLineLen],
-						Body:   string([]rune(blk.Body)[prevChunkBodyEndIdx : prevChunkBodyEndIdx+maxLineLen]),
+						Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx],
+						Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:bodyEndIdx]),
 					})
-					blkWidth -= maxLineLen
-					prevChunkBodyEndIdx += maxLineLen
+					c -= maxLineLen
+					prevHeaderChunkEndIdx = headerEndIdx
+					prevBodyChunkEndIdx = bodyEndIdx
 				}
-				/// grab the remaining block
-				if blkWidth > 0 {
+				/// grab the remaining block, avoiding zero-width blocks
+				if c > 0 && len(blk.Header[prevHeaderChunkEndIdx:]) != 0 {
 					b := block{
 						Type:   blk.Type,
-						Header: blk.Header[prevChunkHeaderEndIdx:],
-						Body:   string([]rune(blk.Body)[prevChunkBodyEndIdx:]),
+						Header: blk.Header[prevHeaderChunkEndIdx:],
+						Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:]),
 					}
 					chunks = append(chunks, b)
 				}
