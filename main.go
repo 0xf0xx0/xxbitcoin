@@ -438,28 +438,20 @@ func chunkData(blocks []block) [][]block {
 	maxLineLen := 80
 	currLineIdx := 0
 	currLineLen := 0
-	/// TODO: refactor and cleanup
+
 	for _, blk := range blocks {
 		/// calc width of blk without borders
 		blkWidth := blk.Width()
-		/// edge case fix: start on newline if the current line is already too long
-		/// FIXME: remove?????????
-		// if currLineLen >= maxLineLen {
-		// 	currLineIdx++
-		// 	ret = append(ret, make([]block, 0, 3))
-		// 	currLineLen -= maxLineLen
-		// }
-
-		/// NOTE: unsure if this is buggy
 		/// estimate placed length including borders
 		estimatedLen := currLineLen + blkWidth + 2
 		/// blocks strung after the furst only have one new border
 		if len(ret[currLineIdx]) > 0 {
 			estimatedLen -= 1
 		}
+
 		println(fmt.Sprintf("idx: %d:%d; est len after printing: %d; body: %q; type: %s", currLineIdx, currLineLen, estimatedLen, replaceNonPrintable(blk.Body), blk.Type))
 
-		/// shared chunking
+		/// chunk
 		if estimatedLen >= maxLineLen {
 			chunks := make([]block, 0, 4)
 			maxRunesCurrentLine := maxLineLen - currLineLen
@@ -595,10 +587,6 @@ func chunkData(blocks []block) [][]block {
 	}
 	return ret
 }
-
-// chunks a long string block across multiple lines
-// FIXME: make greedier (it likes to hang under 80 when theres room to perfectly fit in)
-// see: coinbasetx 010000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff260298001a2f706f676f6c6f202d20666f73732069732066726565646f6d2f0dd001bc00000000ffffffff023dc4039500000000160014629cf95ea52e949c3c0ed47a0fbb41a6bc0b194d0000000000000000266a24aa21a9eddaa2ef8f94277097f2e6f4c51f63cff7aac266edfbda60842baeb5b25acde7bb0120000000000000000000000000000000000000000000000000000000000000000000000000
 
 func appendChunksToLine(ret *[][]block, currLine int, chunks []block, lineLength int, currLen int, lineLengthMax int) (int, int) {
 	(*ret)[currLine] = append((*ret)[currLine], chunks[0])
