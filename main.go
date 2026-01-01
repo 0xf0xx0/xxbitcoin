@@ -466,11 +466,10 @@ func chunkData(blocks []block) [][]block {
 
 			switch blk.Type {
 			case DATATYPE_STRING:
-				lh := min(len(blk.Header), maxRunesCurrentLine)
+				lh := min(len(blk.Header), maxRunesCurrentLine-(maxRunesCurrentLine%3))
 				lb := min(len([]rune(blk.Body)), lh/3)
 
 				chunks = append(chunks, block{Type: blk.Type, Header: strings.TrimSpace(blk.Header[:lh]), Body: string([]rune(blk.Body)[:lb])})
-				blkWidth -= lh
 				prevBodyChunkEndIdx := lb
 				prevHeaderChunkEndIdx := lh
 				for blkWidth >= maxLineLen {
@@ -488,7 +487,42 @@ func chunkData(blocks []block) [][]block {
 				currLineIdx, estimatedLen = appendChunksToLine(&ret, currLineIdx, chunks, blkWidth, currLineLen, maxLineLen)
 			case DATATYPE_ERR:
 				/// try with script 30450221009d4cdcb330786e787164a025abca8a0655f3803da66ef18d14745819b7e28b6b02200d98881bdd055ff2da39e61a858936866610c7e878ea62f08c5ee1534532c14a01
-				currLineIdx, estimatedLen = chunkErrorBlock(blk, maxLineLen, currLineLen, &ret, currLineIdx, blkWidth)
+				lh := min(len(blk.Header), maxRunesCurrentLine - (maxRunesCurrentLine % 3))
+				lb := min(len([]rune(blk.Body)), maxRunesCurrentLine - (maxRunesCurrentLine % 3))
+				/// nibble just enough to fill the line
+				chunks = append(chunks, block{
+					Type:   blk.Type,
+					Header: blk.Header[:lh],
+					Body:   string([]rune(blk.Body)[:lb]),
+				})
+				prevBodyChunkEndIdx := lb
+				prevHeaderChunkEndIdx := lh
+				/// take big line bites
+				for blkWidth >= maxLineLen {
+					headerEndIdx := min(prevHeaderChunkEndIdx+maxLineLen, len(blk.Header))
+					bodyEndIdx := min(prevBodyChunkEndIdx+maxLineLen, len([]rune(blk.Body)))
+					chunks = append(chunks, block{
+						Type:   blk.Type,
+						Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx],
+						Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:bodyEndIdx]),
+					})
+					blkWidth -= maxLineLen
+					prevHeaderChunkEndIdx = headerEndIdx
+					prevBodyChunkEndIdx = bodyEndIdx
+				}
+				/// grab the remaining block
+				if blkWidth > 0 {
+					b := block{
+						Type:   blk.Type,
+						Header: blk.Header[prevHeaderChunkEndIdx:],
+						Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:]),
+					}
+					chunks = append(chunks, b)
+				}
+				println(currLineIdx, estimatedLen)
+				currLineIdx, estimatedLen = appendChunksToLine(&ret, currLineIdx, chunks, blkWidth, currLineLen, maxLineLen)
+				println(currLineIdx, estimatedLen)
+
 			case DATATYPE_TIME:
 				fallthrough
 			// case DATATYPE_MISC:
@@ -551,53 +585,9 @@ func chunkData(blocks []block) [][]block {
 // FIXME: make greedier (it likes to hang under 80 when theres room to perfectly fit in)
 // see: coinbasetx 010000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff260298001a2f706f676f6c6f202d20666f73732069732066726565646f6d2f0dd001bc00000000ffffffff023dc4039500000000160014629cf95ea52e949c3c0ed47a0fbb41a6bc0b194d0000000000000000266a24aa21a9eddaa2ef8f94277097f2e6f4c51f63cff7aac266edfbda60842baeb5b25acde7bb0120000000000000000000000000000000000000000000000000000000000000000000000000
 
-func chunkErrorBlock(blk block, lineLengthMax int, currLen int, ret *[][]block, currLine int, blkWidth int) (int, int) {
-	chunks := make([]block, 0, 4)
-
-	/// %2 to floor-to-even
-	maxRunesCurrentLine := (lineLengthMax - currLen) - ((lineLengthMax - currLen) % 2)
-
-	lh := min(len(blk.Header), maxRunesCurrentLine)
-	lb := min(len([]rune(blk.Body)), maxRunesCurrentLine)
-	/// nibble just enough to fill the line
-	chunks = append(chunks, block{
-		Type:   blk.Type,
-		Header: blk.Header[:lh],
-		Body:   string([]rune(blk.Body)[:lb]),
-	})
-	blkWidth -= max(lh, lb)
-	prevBodyChunkEndIdx := lb
-	prevHeaderChunkEndIdx := lh
-	/// take big line bites
-	for blkWidth > lineLengthMax {
-		headerEndIdx := min(prevHeaderChunkEndIdx+lineLengthMax, len(blk.Header)) - 2
-		bodyEndIdx := min(prevBodyChunkEndIdx+lineLengthMax, len([]rune(blk.Body)))
-		chunks = append(chunks, block{
-			Type:   blk.Type,
-			Header: blk.Header[prevHeaderChunkEndIdx:headerEndIdx],
-			Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:bodyEndIdx]),
-		})
-		blkWidth -= lineLengthMax
-		prevHeaderChunkEndIdx = headerEndIdx
-		prevBodyChunkEndIdx = bodyEndIdx
-	}
-	/// grab the remaining block
-	if blkWidth > 0 {
-		b := block{
-			Type:   blk.Type,
-			Header: blk.Header[prevHeaderChunkEndIdx:],
-			Body:   string([]rune(blk.Body)[prevBodyChunkEndIdx:]),
-		}
-		chunks = append(chunks, b)
-	}
-
-	currLine, blkWidth = appendChunksToLine(ret, currLine, chunks, blkWidth, currLen, lineLengthMax)
-
-	return currLine, blkWidth
-}
-
 func appendChunksToLine(ret *[][]block, currLine int, chunks []block, lineLength int, currLen int, lineLengthMax int) (int, int) {
 	(*ret)[currLine] = append((*ret)[currLine], chunks[0])
+	println("xxx", lineLength)
 	lineLength++ /// opening border
 	if len(chunks) > 1 {
 		for _, b := range chunks[1:] {
