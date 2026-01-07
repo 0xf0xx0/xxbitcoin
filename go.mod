@@ -5,7 +5,7 @@ go 1.25.1
 //replace github.com/Delta456/box-cli-maker/v2 => ../../GitHub/box-cli-maker
 
 require (
-	github.com/0xf0xx0/oigiki v1.2.0
+	git.0xf0xx0.eth.limo/0xf0xx0/oigiki v1.3.0
 	github.com/Delta456/box-cli-maker/v2 v2.3.0
 	github.com/btcsuite/btcd v0.25.0
 	github.com/btcsuite/btcd/btcutil v1.1.6

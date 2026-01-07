@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/0xf0xx0/oigiki"
+	"git.0xf0xx0.eth.limo/0xf0xx0/oigiki"
 	"github.com/Delta456/box-cli-maker/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -469,7 +469,7 @@ func chunkData(blocks []block) [][]block {
 					chunks = append(chunks, block{
 						Type:   blk.Type,
 						Header: strings.TrimSpace(blk.Header[:lh]),
-						Body: string([]rune(blk.Body)[:lb]),
+						Body:   string([]rune(blk.Body)[:lb]),
 					})
 				}
 				prevBodyChunkEndIdx := lb
