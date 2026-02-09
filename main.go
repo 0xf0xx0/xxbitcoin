@@ -16,7 +16,7 @@ import (
 	"unicode"
 
 	"git.0xf0xx0.eth.limo/0xf0xx0/oigiki"
-	"github.com/Delta456/box-cli-maker/v2"
+	"github.com/box-cli-maker/box-cli-maker/v3"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
@@ -632,12 +632,9 @@ func padString(str string, l int) string {
 
 // merge boxes together into one box line
 func mergeBoxes(boxes []block) string {
-	b := box.New(
-		box.Config{
-			ContentAlign: "Center",
-			Type:         "Single",
-		},
-	)
+	b := box.NewBox().
+		ContentAlign(box.Center).
+		Style(box.Single)
 	ret := make([]string, 4)
 
 	for i, blk := range boxes {
@@ -645,7 +642,11 @@ func mergeBoxes(boxes []block) string {
 		str := replaceNonPrintable(blk.Body)
 		str = padString(colorText(blk.Type, str), len(oigiki.StripTags(boxes[i].Header)))
 		/// body needs to be processed here cause box compensates for ansi
-		boxStr := b.String("", oigiki.ProcessTags(str))
+		boxStr, err := b.Render("", oigiki.ProcessTags(str))
+		if err != nil {
+			log.Printf("error making box %d: %s", i, err)
+			return ""
+		}
 		split := strings.Split(boxStr, "\n")
 		/// box height is always 3
 		if i == 0 && len(boxes) == 1 {
