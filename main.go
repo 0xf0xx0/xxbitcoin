@@ -477,7 +477,7 @@ func chunkData(blocks []block) [][]block {
 				c := blkWidth
 				/// take big line bites
 				for c >= maxLineLen {
-					headerEndIdx := min(prevHeaderChunkEndIdx+maxLineLen, len(blk.Header))
+					headerEndIdx := min(prevHeaderChunkEndIdx+maxLineLen-2, len(blk.Header))
 					bodyEndIdx := min(prevBodyChunkEndIdx+(maxLineLen/3), len([]rune(blk.Body)))
 					chunks = append(chunks, block{
 						Type:   blk.Type,
