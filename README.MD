@@ -33,5 +33,7 @@ echo <hex-encoded structure> | xxbitcoin --type <data structure type>
 - [x] decode transactions
     - decode txout destinations?
 - [ ] decode blocks
+- [ ] decode stratum v1 messages
+- [ ] decode stratum v2 messages
 - [ ] error handling
 - [ ] allow for different window sizes?
